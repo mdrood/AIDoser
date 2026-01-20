@@ -2,24 +2,28 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <math.h>
+#include <time.h>
 
-// ===================== WIFI / WEB SETUP =====================
+// ===================== WIFI / NTP SETUP =====================
 
-// You can change these if you want
-const char* AP_SSID     = "ReefDoserESP32";
-const char* AP_PASSWORD = "reefpassword";
+// CHANGE THESE TO YOUR HOME WIFI
+const char* WIFI_SSID     = "rood";
+const char* WIFI_PASSWORD = "Frinov25!+!";
 
 WebServer server(80);
 
+// NTP server and timezone (Central Time / Chicago)
+const char* NTP_SERVER     = "pool.ntp.org";
+const long  GMT_OFFSET_SEC = -6 * 3600;  // UTC-6 standard time
+const int   DST_OFFSET_SEC = 3600;       // DST +1h (simple)
+
 // ===================== TARGETS & TANK INFO =====================
 
-// Your target parameters
 const float TARGET_ALK = 9.0f;      // dKH
 const float TARGET_CA  = 420.0f;    // ppm
 const float TARGET_MG  = 1440.0f;   // ppm
-const float TARGET_PH  = 8.20f;     // NEW FOR pH
+const float TARGET_PH  = 8.20f;     // pH
 
-// Your 300 gallon system
 // 300 gal × 3.78541 = 1135.6 L
 const float TANK_VOLUME_L = 1135.6f;
 
@@ -31,18 +35,13 @@ const int PIN_PUMP_KALK = 25;
 const int PIN_PUMP_AFR  = 26;
 const int PIN_PUMP_MG   = 27;
 
-// ---- FLOW RATES ----
 // Measure each pump: run for 60 seconds into a cup, measure ml.
-float FLOW_KALK_ML_PER_MIN = 50.0f;  
+float FLOW_KALK_ML_PER_MIN = 50.0f;
 float FLOW_AFR_ML_PER_MIN  = 50.0f;
 float FLOW_MG_ML_PER_MIN   = 50.0f;
 
 
 // ===================== CHEMISTRY CONSTANTS =====================
-//
-// These are the “ballpark guessed values” so no calibration experiments needed.
-// The AI portion will tune ml/day automatically as you test every ~3 days.
-//
 
 // ---------- KALKWASSER (saturated) ----------
 float DKH_PER_ML_KALK_TANK    = 0.00010f;   // +0.00010 dKH/ml in 300g
@@ -60,11 +59,11 @@ float MG_PPM_PER_ML_MG_TANK   = 0.20f;      // +0.20 ppm Mg/ml
 // ===================== DOSING CONFIG & TEST DATA =====================
 
 struct TestPoint {
-  uint32_t t;  // seconds since boot
+  uint32_t t;  // seconds since boot (for graph; not wall time)
   float ca;
   float alk;
   float mg;
-  float ph;    // NEW FOR pH
+  float ph;
 };
 
 struct DosingConfig {
@@ -80,10 +79,13 @@ DosingConfig dosing = {
   0.0f     // ml/day Mg
 };
 
-// Safety limits (per day)
-float MAX_KALK_ML_PER_DAY = 8000.0f;  // max ~8L/day
-float MAX_AFR_ML_PER_DAY  = 400.0f;
-float MAX_MG_ML_PER_DAY   = 80.0f;
+// SAFETY LIMITS (ml/day caps)
+float MAX_KALK_ML_PER_DAY = 2500.0f;  // 2.5L/day max Kalk
+float MAX_AFR_ML_PER_DAY  = 200.0f;   // 200 ml/day max AFR
+float MAX_MG_ML_PER_DAY   = 40.0f;    // 40 ml/day max Mg
+
+// SAFETY: throttle dosing if no tests for a while
+uint32_t lastSafetyBackoffTs = 0;
 
 
 // ===================== TEST HISTORY FOR GRAPHS =====================
@@ -96,16 +98,45 @@ TestPoint lastTest    = {0, 0, 0, 0, 0};
 TestPoint currentTest = {0, 0, 0, 0, 0};
 
 
-// ===================== DOSING SCHEDULE =====================
+// ===================== DOSING SCHEDULE (REAL-TIME, 3 DOSES/DAY) =====================
 
-const int DOSES_PER_DAY_KALK = 24;
-const int DOSES_PER_DAY_AFR  = 8;
-const int DOSES_PER_DAY_MG   = 4;
+// 3 doses per day per pump
+const int DOSES_PER_DAY_KALK = 3;
+const int DOSES_PER_DAY_AFR  = 3;
+const int DOSES_PER_DAY_MG   = 3;
 
+// per-dose run time (seconds)
 float SEC_PER_DOSE_KALK = 0.0f;
 float SEC_PER_DOSE_AFR  = 0.0f;
 float SEC_PER_DOSE_MG   = 0.0f;
 
+// Real-time schedule: 3 time slots per day (HH:MM)
+// 9:30 AM, 12:30 PM, 3:30 PM (Central Time)
+const int DOSE_SLOTS_PER_DAY = 3;
+int DOSE_HOURS[DOSE_SLOTS_PER_DAY]   = {9, 12, 15};
+int DOSE_MINUTES[DOSE_SLOTS_PER_DAY] = {30, 30, 30};
+
+// Track whether we've dosed each slot for the current day
+int  lastDoseDay = -1;                        // tm_yday of last day we reset
+bool slotDone[DOSE_SLOTS_PER_DAY] = {false, false, false};
+
+
+// ===================== IFTTT WEBHOOK SETUP =====================
+// Get your key from: https://ifttt.com/maker_webhooks
+// It will look like: https://maker.ifttt.com/use/<YOUR_KEY_HERE>
+
+const char* IFTTT_HOST = "maker.ifttt.com";
+const int   IFTTT_PORT = 80;
+
+// 🔴 REPLACE THIS with your actual Maker key
+const char* IFTTT_KEY = "fBplW8jJqqotTqTxck4oTdK_oHTJKAawKfja-WlcgW-";
+
+// Forward declarations
+int sendIFTTT(String eventName,
+              String value1 = "",
+              String value2 = "",
+              String value3 = "");
+String getLocalTimeString();
 
 // ===================== HELPERS =====================
 
@@ -145,9 +176,6 @@ void updatePumpSchedules() {
   }
 }
 
-
-// ===================== PUSH HISTORY =====================
-
 void pushHistory(const TestPoint& tp){
   if(historyCount < MAX_HISTORY){
     historyBuf[historyCount++] = tp;
@@ -158,9 +186,127 @@ void pushHistory(const TestPoint& tp){
 }
 
 
-// ===================== “AI” CONTROL (with pH bias) =====================
+// ===================== IFTTT HELPERS =====================
+
+int sendIFTTT(String eventName,
+              String value1,
+              String value2,
+              String value3) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("IFTTT: WiFi not connected");
+    return -1;
+  }
+
+  WiFiClient client;
+  if (!client.connect(IFTTT_HOST, IFTTT_PORT)) {
+    Serial.println("IFTTT: connection failed");
+    return -2;
+  }
+
+  // URL: /trigger/{event}/with/key/{KEY}
+  String url = "/trigger/" + eventName + "/with/key/" + String(IFTTT_KEY);
+
+  // Build JSON body
+  String json = "{";
+  bool first = true;
+  if (value1.length()) { json += "\"value1\":\"" + value1 + "\""; first = false; }
+  if (value2.length()) { if (!first) json += ","; json += "\"value2\":\"" + value2 + "\""; first = false; }
+  if (value3.length()) { if (!first) json += ","; json += "\"value3\":\"" + value3 + "\""; }
+  json += "}";
+
+  String request;
+  request  = "POST " + url + " HTTP/1.1\r\n";
+  request += "Host: " + String(IFTTT_HOST) + "\r\n";
+  request += "Content-Type: application/json\r\n";
+  request += "Content-Length: " + String(json.length()) + "\r\n";
+  request += "Connection: close\r\n\r\n";
+  request += json;
+
+  client.print(request);
+
+  unsigned long start = millis();
+  while (client.connected() && millis() - start < 3000) {
+    while (client.available()) {
+      char c = client.read();
+      // Serial.write(c); // Uncomment if you want to see HTTP response
+    }
+  }
+  client.stop();
+
+  Serial.print("IFTTT: event ");
+  Serial.print(eventName);
+  Serial.println(" sent");
+
+  return 0;
+}
+
+String getLocalTimeString() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    return "time unknown";
+  }
+  char buf[32];
+  strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &timeinfo);
+  return String(buf);
+}
+
+
+// ===================== SAFETY: CHEMISTRY-BASED CAPS =====================
+
+void enforceChemSafetyCaps() {
+  float alkRise =
+      dosing.ml_per_day_kalk * DKH_PER_ML_KALK_TANK +
+      dosing.ml_per_day_afr  * DKH_PER_ML_AFR_TANK;
+
+  float caRise =
+      dosing.ml_per_day_kalk * CA_PPM_PER_ML_KALK_TANK +
+      dosing.ml_per_day_afr  * CA_PPM_PER_ML_AFR_TANK;
+
+  float mgRise =
+      dosing.ml_per_day_afr  * MG_PPM_PER_ML_AFR_TANK +
+      dosing.ml_per_day_mg   * MG_PPM_PER_ML_MG_TANK;
+
+  const float MAX_ALK_RISE_DKH_PER_DAY = 0.8f;
+  const float MAX_CA_RISE_PPM_PER_DAY  = 20.0f;
+  const float MAX_MG_RISE_PPM_PER_DAY  = 30.0f;
+
+  float scale = 1.0f;
+
+  if (alkRise > MAX_ALK_RISE_DKH_PER_DAY && alkRise > 0.0f) {
+    float s = MAX_ALK_RISE_DKH_PER_DAY / alkRise;
+    if (s < scale) scale = s;
+  }
+
+  if (caRise > MAX_CA_RISE_PPM_PER_DAY && caRise > 0.0f) {
+    float s = MAX_CA_RISE_PPM_PER_DAY / caRise;
+    if (s < scale) scale = s;
+  }
+
+  if (mgRise > MAX_MG_RISE_PPM_PER_DAY && mgRise > 0.0f) {
+    float s = MAX_MG_RISE_PPM_PER_DAY / mgRise;
+    if (s < scale) scale = s;
+  }
+
+  if (scale < 1.0f) {
+    dosing.ml_per_day_kalk *= scale;
+    dosing.ml_per_day_afr  *= scale;
+    dosing.ml_per_day_mg   *= scale;
+    Serial.print("SAFETY: Scaling dosing by ");
+    Serial.println(scale, 3);
+
+    // IFTTT alert: dosing scaled by safety
+    sendIFTTT("reef_dose_scaled",
+              "Dosing scaled by safety",
+              "scale=" + String(scale, 3),
+              getLocalTimeString());
+  }
+}
+
+
+// ===================== “AI” CONTROL (with pH bias & safety) =====================
 
 void onNewTestInput(float ca, float alk, float mg, float ph){
+  // Update history for graph
   lastTest = currentTest;
   currentTest.t   = nowSeconds();
   currentTest.ca  = ca;
@@ -169,51 +315,58 @@ void onNewTestInput(float ca, float alk, float mg, float ph){
   currentTest.ph  = ph;
   pushHistory(currentTest);
 
-  // First test: just update schedules
+  // Sanity check ranges (ignore for dosing if crazy)
+  if (ca   < 300.0f || ca   > 550.0f ||
+      alk  <   5.0f || alk  > 14.0f  ||
+      mg   <1100.0f || mg   >1600.0f ||
+      ph   <   7.0f || ph   >  9.0f) {
+    Serial.println("SAFETY: IGNORING TEST for dosing (out-of-range). Graph updated only.");
+    return;
+  }
+
+  // First valid test: just set schedules from starting dosing
   if(lastTest.t == 0){
     updatePumpSchedules();
     return;
   }
 
   float days = float(currentTest.t - lastTest.t) / 86400.0f;
-  if(days <= 0.25f) return;  // ignore if tests are too close
+  if(days <= 0.25f) {
+    Serial.println("SAFETY: Tests too close together, ignoring for dosing updates.");
+    return;
+  }
 
-  // Consumption per day (positive means the tank used that much)
+  // Consumption per day
   float consAlk = (lastTest.alk - currentTest.alk) / days;
   float consCa  = (lastTest.ca  - currentTest.ca ) / days;
   float consMg  = (lastTest.mg  - currentTest.mg ) / days;
 
-  // If alk is rising, don't treat as consumption
   float alkNeeded = consAlk;
   if(alkNeeded < 0.0f) alkNeeded = 0.0f;
 
-  // --- pH-based bias: more Kalk if pH is low, less Kalk if pH is high ---
-  float kalkFrac = 0.8f;  // default: 80% of alk from Kalk
+  // pH bias
+  float kalkFrac = 0.8f;  // default: 80% alk from kalk
 
   if (!isnan(currentTest.ph)) {
     float phError = currentTest.ph - TARGET_PH;
 
-    // small deadband so it doesn't flap constantly
     if (phError < -0.05f) {
-      // pH is LOW -> favor Kalk a bit more
-      kalkFrac = 0.90f;   // 90% Kalk / 10% AFR
+      // pH low -> more kalk
+      kalkFrac = 0.90f;
     } else if (phError > 0.05f) {
-      // pH is HIGH -> favor AFR a bit more (less high-pH Kalk)
-      kalkFrac = 0.70f;   // 70% Kalk / 30% AFR
+      // pH high -> more AFR, less kalk
+      kalkFrac = 0.70f;
     }
   }
 
-  // clamp just in case
   kalkFrac = clampf(kalkFrac, 0.6f, 0.95f);
 
   float targetAlkFromKalk = kalkFrac        * alkNeeded;
   float targetAlkFromAfr  = (1.0f-kalkFrac) * alkNeeded;
 
-  // Suggest daily ml for each source based on alk
   float suggested_ml_kalk = (DKH_PER_ML_KALK_TANK > 0.0f) ? (targetAlkFromKalk / DKH_PER_ML_KALK_TANK) : 0.0f;
   float suggested_ml_afr  = (DKH_PER_ML_AFR_TANK  > 0.0f) ? (targetAlkFromAfr  / DKH_PER_ML_AFR_TANK ) : 0.0f;
 
-  // Predict Ca/Mg from those suggestions
   float caFromKalk = suggested_ml_kalk * CA_PPM_PER_ML_KALK_TANK;
   float caFromAfr  = suggested_ml_afr  * CA_PPM_PER_ML_AFR_TANK;
   float mgFromAfr  = suggested_ml_afr  * MG_PPM_PER_ML_AFR_TANK;
@@ -221,13 +374,11 @@ void onNewTestInput(float ca, float alk, float mg, float ph){
   float caError = consCa - (caFromKalk + caFromAfr);
   float mgError = consMg - (mgFromAfr);
 
-  // Adjust AFR to help with Ca if way off
   if(fabsf(caError) > 5.0f){
     float afrCorrection = (caError / CA_PPM_PER_ML_AFR_TANK) * 0.3f;
     suggested_ml_afr += afrCorrection;
   }
 
-  // Magnesium-only line
   float suggested_ml_mg = dosing.ml_per_day_mg;
   if(consMg > mgFromAfr + 0.5f){
     float mgCorrection = (consMg - mgFromAfr) / MG_PPM_PER_ML_MG_TANK;
@@ -235,33 +386,59 @@ void onNewTestInput(float ca, float alk, float mg, float ph){
     suggested_ml_mg += mgCorrection;
   }
 
-  // Enforce non-negative
   suggested_ml_kalk = max(0.0f, suggested_ml_kalk);
   suggested_ml_afr  = max(0.0f, suggested_ml_afr);
   suggested_ml_mg   = max(0.0f, suggested_ml_mg);
 
-  // Smooth changes
   dosing.ml_per_day_kalk = adjustWithLimit(dosing.ml_per_day_kalk, suggested_ml_kalk);
   dosing.ml_per_day_afr  = adjustWithLimit(dosing.ml_per_day_afr,  suggested_ml_afr);
   dosing.ml_per_day_mg   = adjustWithLimit(dosing.ml_per_day_mg,   suggested_ml_mg);
 
-  // Clamp to safety limits
   dosing.ml_per_day_kalk = clampf(dosing.ml_per_day_kalk, 0.0f, MAX_KALK_ML_PER_DAY);
   dosing.ml_per_day_afr  = clampf(dosing.ml_per_day_afr,  0.0f, MAX_AFR_ML_PER_DAY);
   dosing.ml_per_day_mg   = clampf(dosing.ml_per_day_mg,   0.0f, MAX_MG_ML_PER_DAY);
 
-  // Recompute schedule
+  enforceChemSafetyCaps();
   updatePumpSchedules();
+
+  lastSafetyBackoffTs = nowSeconds();
 }
 
 
-// ===================== PUMP SCHEDULER =====================
+// ===================== SAFETY: BACKOFF IF NO TESTS =====================
 
-unsigned long lastDoseCheckMs = 0;
-int dosesGivenTodayKalk = 0;
-int dosesGivenTodayAfr  = 0;
-int dosesGivenTodayMg   = 0;
-unsigned long dayStartMs = 0;
+void safetyBackoffIfNoTests() {
+  if (currentTest.t == 0) return;
+
+  uint32_t now = nowSeconds();
+  float daysSinceLastTest = float(now - currentTest.t) / 86400.0f;
+
+  if (daysSinceLastTest <= 5.0f) return;
+  if (now - lastSafetyBackoffTs < 86400UL) return;
+
+  Serial.println("SAFETY: No tests >5 days. Backing off dosing to 70%.");
+  dosing.ml_per_day_kalk *= 0.7f;
+  dosing.ml_per_day_afr  *= 0.7f;
+  dosing.ml_per_day_mg   *= 0.7f;
+
+  dosing.ml_per_day_kalk = clampf(dosing.ml_per_day_kalk, 0.0f, MAX_KALK_ML_PER_DAY);
+  dosing.ml_per_day_afr  = clampf(dosing.ml_per_day_afr,  0.0f, MAX_AFR_ML_PER_DAY);
+  dosing.ml_per_day_mg   = clampf(dosing.ml_per_day_mg,   0.0f, MAX_MG_ML_PER_DAY);
+
+  enforceChemSafetyCaps();
+  updatePumpSchedules();
+
+  lastSafetyBackoffTs = now;
+
+  // IFTTT alert: no tests + backoff
+  sendIFTTT("reef_no_tests_backoff",
+            "No tests >5 days",
+            "Dosing backed off to 70%",
+            getLocalTimeString());
+}
+
+
+// ===================== PUMP SCHEDULER (REAL-TIME SLOTS) =====================
 
 void giveDose(int pin, float seconds){
   if(seconds <= 0) return;
@@ -270,34 +447,76 @@ void giveDose(int pin, float seconds){
   digitalWrite(pin, LOW);
 }
 
-void maybeDosePumps(){
-  unsigned long nowMs = millis();
-
-  // Reset daily counters
-  if(nowMs - dayStartMs > 86400000UL){
-    dayStartMs = nowMs;
-    dosesGivenTodayKalk = 0;
-    dosesGivenTodayAfr  = 0;
-    dosesGivenTodayMg   = 0;
+void maybeDosePumpsRealTime(){
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    // If we can't get time, don't dose
+    Serial.println("WARN: getLocalTime failed, skipping dosing.");
+    return;
   }
 
-  // Check once per minute
-  if(nowMs - lastDoseCheckMs < 60000UL) return;
-  lastDoseCheckMs = nowMs;
+  int dayOfYear = timeinfo.tm_yday;   // 0..365
+  int hour      = timeinfo.tm_hour;   // 0..23
+  int minute    = timeinfo.tm_min;    // 0..59
 
-  if(dosesGivenTodayKalk < DOSES_PER_DAY_KALK){
-    giveDose(PIN_PUMP_KALK, SEC_PER_DOSE_KALK);
-    dosesGivenTodayKalk++;
+  // New day? Reset slot flags
+  if (dayOfYear != lastDoseDay) {
+    lastDoseDay = dayOfYear;
+    for (int i = 0; i < DOSE_SLOTS_PER_DAY; i++) {
+      slotDone[i] = false;
+    }
   }
 
-  if(dosesGivenTodayAfr < DOSES_PER_DAY_AFR){
-    giveDose(PIN_PUMP_AFR, SEC_PER_DOSE_AFR);
-    dosesGivenTodayAfr++;
-  }
+  // Precompute ml per dose for each pump
+  float mlPerDoseKalk = (DOSES_PER_DAY_KALK > 0) ? (dosing.ml_per_day_kalk / DOSES_PER_DAY_KALK) : 0.0f;
+  float mlPerDoseAfr  = (DOSES_PER_DAY_AFR  > 0) ? (dosing.ml_per_day_afr  / DOSES_PER_DAY_AFR ) : 0.0f;
+  float mlPerDoseMg   = (DOSES_PER_DAY_MG   > 0) ? (dosing.ml_per_day_mg   / DOSES_PER_DAY_MG  ) : 0.0f;
 
-  if(dosesGivenTodayMg < DOSES_PER_DAY_MG){
-    giveDose(PIN_PUMP_MG, SEC_PER_DOSE_MG);
-    dosesGivenTodayMg++;
+  String timeStr = getLocalTimeString();
+
+  // For each slot, if we are past the time and haven't dosed it yet, dose once.
+  for(int i = 0; i < DOSE_SLOTS_PER_DAY; i++){
+    if (slotDone[i]) continue;
+
+    int sh = DOSE_HOURS[i];
+    int sm = DOSE_MINUTES[i];
+
+    bool timeReached =
+      (hour > sh) || (hour == sh && minute >= sm);
+
+    if (timeReached) {
+      Serial.print("Dosing slot ");
+      Serial.println(i);
+
+      // --- Kalk dose & IFTTT ---
+      if (SEC_PER_DOSE_KALK > 0.0f && mlPerDoseKalk > 0.0f) {
+        giveDose(PIN_PUMP_KALK, SEC_PER_DOSE_KALK);
+        sendIFTTT("reef_dose_kalk",
+                  "Kalk",
+                  String(mlPerDoseKalk, 1) + " ml",
+                  timeStr);
+      }
+
+      // --- AFR dose & IFTTT ---
+      if (SEC_PER_DOSE_AFR > 0.0f && mlPerDoseAfr > 0.0f) {
+        giveDose(PIN_PUMP_AFR, SEC_PER_DOSE_AFR);
+        sendIFTTT("reef_dose_afr",
+                  "AllForReef",
+                  String(mlPerDoseAfr, 1) + " ml",
+                  timeStr);
+      }
+
+      // --- Mg dose & IFTTT ---
+      if (SEC_PER_DOSE_MG > 0.0f && mlPerDoseMg > 0.0f) {
+        giveDose(PIN_PUMP_MG, SEC_PER_DOSE_MG);
+        sendIFTTT("reef_dose_mg",
+                  "Magnesium",
+                  String(mlPerDoseMg, 1) + " ml",
+                  timeStr);
+      }
+
+      slotDone[i] = true;
+    }
   }
 }
 
@@ -403,9 +622,6 @@ setInterval(update, 10000);
 </html>
 )rawliteral";
 
-
-// ---------- HTTP Handlers ----------
-
 void handleRoot(){
   server.send_P(200, "text/html", MAIN_PAGE_HTML);
 }
@@ -430,14 +646,12 @@ void handleSubmitTest(){
 void handleApiHistory(){
   String json = "{";
 
-  // dosing
   json += "\"dosing\":{";
   json += "\"kalk\":" + String(dosing.ml_per_day_kalk, 1) + ",";
   json += "\"afr\":"  + String(dosing.ml_per_day_afr,  1) + ",";
   json += "\"mg\":"   + String(dosing.ml_per_day_mg,   1);
   json += "},";
 
-  // history
   json += "\"tests\":[";
   for(int i = 0; i < historyCount; i++){
     const TestPoint& tp = historyBuf[i];
@@ -471,22 +685,49 @@ void setup(){
   digitalWrite(PIN_PUMP_AFR,  LOW);
   digitalWrite(PIN_PUMP_MG,   LOW);
 
-  dayStartMs = millis();
   updatePumpSchedules();
+  lastSafetyBackoffTs = nowSeconds();
 
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_SSID, AP_PASSWORD);
-  Serial.print("AP IP address: ");
-  Serial.println(WiFi.softAPIP());
+  // Connect to home Wi-Fi
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+  Serial.print("Connected, IP address: ");
+  Serial.println(WiFi.localIP());
 
+  // NTP time sync
+  configTime(GMT_OFFSET_SEC, DST_OFFSET_SEC, NTP_SERVER);
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    Serial.println("Failed to obtain time from NTP");
+  } else {
+    Serial.println("Time synchronized from NTP");
+  }
+
+  // Web server routes
   server.on("/", handleRoot);
   server.on("/submit_test", handleSubmitTest);
   server.on("/api/history", handleApiHistory);
   server.begin();
   Serial.println("HTTP server started");
+
+  // IFTTT: report we are online
+  sendIFTTT("reef_doser_online",
+            "Reef doser booted",
+            WiFi.localIP().toString(),
+            getLocalTimeString());
 }
 
 void loop(){
   server.handleClient();
-  maybeDosePumps();
+
+  safetyBackoffIfNoTests();
+
+  // Dose at 3 scheduled time slots per day
+  maybeDosePumpsRealTime();
 }
