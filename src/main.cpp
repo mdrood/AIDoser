@@ -7,7 +7,7 @@
 // ===================== WIFI / NTP SETUP =====================
 
 // CHANGE THESE TO YOUR HOME WIFI
-const char* WIFI_SSID     = "rood";
+const char* WIFI_SSID     = "roods";
 const char* WIFI_PASSWORD = "Frinov25!+!";
 
 WebServer server(80);
@@ -19,10 +19,10 @@ const int   DST_OFFSET_SEC = 3600;       // DST +1h (simple)
 
 // ===================== TARGETS & TANK INFO =====================
 
-const float TARGET_ALK = 9.0f;      // dKH
-const float TARGET_CA  = 420.0f;    // ppm
-const float TARGET_MG  = 1440.0f;   // ppm
-const float TARGET_PH  = 8.20f;     // pH
+const float TARGET_ALK = 8.5f;      // dKH   eric 8.5
+const float TARGET_CA  = 450.0f;    // ppm   450
+const float TARGET_MG  = 1440.0f;   // ppm   1400
+const float TARGET_PH  = 8.3f;     // pH    8.3
 
 // 300 gal × 3.78541 = 1135.6 L
 const float TANK_VOLUME_L = 1135.6f;
@@ -36,8 +36,8 @@ const int PIN_PUMP_AFR  = 26;
 const int PIN_PUMP_MG   = 27;
 
 // Measure each pump: run for 60 seconds into a cup, measure ml.
-float FLOW_KALK_ML_PER_MIN = 50.0f;
-float FLOW_AFR_ML_PER_MIN  = 50.0f;
+float FLOW_KALK_ML_PER_MIN = 675.0f;
+float FLOW_AFR_ML_PER_MIN  = 645.0f;
 float FLOW_MG_ML_PER_MIN   = 50.0f;
 
 
@@ -525,63 +525,435 @@ void maybeDosePumpsRealTime(){
 
 const char MAIN_PAGE_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Reef AI Doser</title>
 <style>
-body { font-family: Arial, sans-serif; margin:20px;}
-.card{border:1px solid #ccc;padding:16px;margin-bottom:20px;border-radius:8px;}
-input{width:120px;}
-table{border-collapse:collapse;width:100%;}
-th,td{border:1px solid #ccc;padding:4px;text-align:right;}
-th{background:#eee;}
-.tag{display:inline-block;padding:3px 8px;background:#ddd;border-radius:4px;margin-right:5px;}
+  :root {
+    --bg: #020817;
+    --bg-card: rgba(15, 23, 42, 0.96);
+    --accent: #22d3ee;
+    --accent-soft: rgba(56, 189, 248, 0.18);
+    --accent-strong: #38bdf8;
+    --text: #e2e8f0;
+    --text-soft: #94a3b8;
+    --border: rgba(148, 163, 184, 0.35);
+    --danger: #f97373;
+    --success: #4ade80;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", Arial, sans-serif;
+    background: radial-gradient(circle at top, #0ea5e9 0, #020617 40%, #020617 100%);
+    color: var(--text);
+    display: flex;
+    justify-content: center;
+    padding: 16px;
+  }
+
+  .shell {
+    width: 100%;
+    max-width: 900px;
+  }
+
+  .glass-panel {
+    background: linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.96));
+    border-radius: 18px;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    box-shadow:
+      0 24px 60px rgba(15, 23, 42, 0.9),
+      0 0 0 1px rgba(15, 23, 42, 0.7);
+    padding: 18px 16px 22px;
+    backdrop-filter: blur(18px);
+  }
+
+  @media (min-width: 640px) {
+    .glass-panel {
+      padding: 22px 24px 26px;
+    }
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+  }
+
+  .reef-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 999px;
+    background: radial-gradient(circle at 30% 20%, #e0f2fe, #0ea5e9 40%, #0369a1 70%, #020617 100%);
+    box-shadow:
+      0 0 0 2px rgba(8, 47, 73, 0.8),
+      0 12px 26px rgba(12, 74, 110, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .reef-icon-wave {
+    width: 70%;
+    height: 70%;
+    border-radius: 50%;
+    border: 2px solid rgba(226, 232, 240, 0.9);
+    border-top-color: transparent;
+    border-left-color: transparent;
+    transform: rotate(25deg);
+  }
+
+  header h1 {
+    font-size: 1.4rem;
+    letter-spacing: 0.03em;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  header h1 span.highlight {
+    color: var(--accent);
+  }
+
+  header p {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--text-soft);
+  }
+
+  .pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+  }
+
+  .pill {
+    font-size: 0.7rem;
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    color: var(--text-soft);
+    background: rgba(15, 23, 42, 0.9);
+  }
+
+  .pill.accent {
+    border-color: rgba(34, 211, 238, 0.8);
+    background: radial-gradient(circle at 20% 0%, rgba(56, 189, 248, 0.25), rgba(15, 23, 42, 0.85));
+    color: var(--accent);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  @media (min-width: 768px) {
+    .grid {
+      grid-template-columns: minmax(0,1.1fr) minmax(0,1fr);
+    }
+  }
+
+  .card {
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.98));
+    padding: 14px 14px 16px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .card::before {
+    content: "";
+    position: absolute;
+    inset: -40%;
+    background:
+      radial-gradient(circle at 0% 0%, var(--accent-soft), transparent 55%),
+      radial-gradient(circle at 100% 100%, rgba(59,130,246,0.12), transparent 55%);
+    opacity: 0.55;
+    pointer-events: none;
+  }
+
+  .card-inner {
+    position: relative;
+    z-index: 1;
+  }
+
+  .card h2 {
+    font-size: 0.95rem;
+    margin: 0 0 8px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+  }
+
+  .card h3 {
+    font-size: 0.9rem;
+    margin: 0 0 10px;
+    color: var(--accent-strong);
+  }
+
+  .field {
+    margin-bottom: 8px;
+  }
+
+  .field label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-soft);
+    margin-bottom: 3px;
+  }
+
+  .field input {
+    width: 100%;
+    border-radius: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.55);
+    background: rgba(15, 23, 42, 0.9);
+    color: var(--text);
+    font-size: 0.85rem;
+    padding: 7px 9px;
+    outline: none;
+  }
+
+  .field input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.4);
+  }
+
+  button[type="submit"] {
+    margin-top: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 14px;
+    font-size: 0.85rem;
+    border-radius: 999px;
+    border: none;
+    background: radial-gradient(circle at 10% 0%, #22d3ee, #1d4ed8);
+    color: #eff6ff;
+    cursor: pointer;
+    box-shadow:
+      0 10px 22px rgba(37, 99, 235, 0.6),
+      0 0 0 1px rgba(30, 64, 175, 0.5);
+  }
+
+  button[type="submit"]:active {
+    transform: translateY(1px);
+    box-shadow:
+      0 6px 18px rgba(37, 99, 235, 0.6),
+      0 0 0 1px rgba(30, 64, 175, 0.6);
+  }
+
+  .tags-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+  }
+
+  .tag {
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid rgba(148, 163, 184, 0.5);
+    color: var(--text-soft);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .tag-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--accent);
+  }
+
+  .tag.kalk .tag-dot {
+    background: #f97316;
+  }
+
+  .tag.afr .tag-dot {
+    background: #a855f7;
+  }
+
+  .tag.mg .tag-dot {
+    background: #22c55e;
+  }
+
+  .tag small {
+    font-size: 0.7rem;
+    color: var(--text-soft);
+  }
+
+  .hint {
+    font-size: 0.7rem;
+    color: var(--text-soft);
+    margin-top: 6px;
+  }
+
+  .hint span {
+    color: var(--accent);
+  }
+
+  .chart-card {
+    margin-top: 14px;
+  }
+
+  .chart-container {
+    width: 100%;
+    max-height: 260px;
+  }
+
+  footer {
+    margin-top: 10px;
+    font-size: 0.7rem;
+    color: var(--text-soft);
+    text-align: right;
+  }
+
+  footer span {
+    color: var(--accent-soft);
+  }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-<h1>Reef AI Doser</h1>
+  <div class="shell">
+    <div class="glass-panel">
+      <header>
+        <div class="reef-icon">
+          <div class="reef-icon-wave"></div>
+        </div>
+        <div>
+          <h1>
+            Reef<span class="highlight">AI</span> Doser
+          </h1>
+          <p>Adaptive dosing for your reef — tuned by your test results.</p>
+          <div class="pill-row">
+            <div class="pill accent">300 gal system</div>
+            <div class="pill">Targets: Alk 9 · Ca 420 · Mg 1440 · pH 8.2</div>
+          </div>
+        </div>
+      </header>
 
-<div class="card">
-<h2>Enter Test (every ~3 days)</h2>
-<form method="POST" action="/submit_test">
-Calcium (ppm): <input type="number" step="0.1" name="ca" required><br><br>
-Alkalinity (dKH): <input type="number" step="0.01" name="alk" required><br><br>
-Magnesium (ppm): <input type="number" step="1" name="mg" required><br><br>
-pH: <input type="number" step="0.01" name="ph" required><br><br>
-<button type="submit">Submit</button>
-</form>
-</div>
+      <div class="grid">
+        <!-- Left side: test form -->
+        <div class="card">
+          <div class="card-inner">
+            <h2>New Test</h2>
+            <h3>Update tank parameters</h3>
+            <form method="POST" action="/submit_test">
+              <div class="field">
+                <label for="ca">Calcium (ppm)</label>
+                <input id="ca" type="number" step="0.1" name="ca" required placeholder="e.g. 420">
+              </div>
+              <div class="field">
+                <label for="alk">Alkalinity (dKH)</label>
+                <input id="alk" type="number" step="0.01" name="alk" required placeholder="e.g. 9.0">
+              </div>
+              <div class="field">
+                <label for="mg">Magnesium (ppm)</label>
+                <input id="mg" type="number" step="1" name="mg" required placeholder="e.g. 1440">
+              </div>
+              <div class="field">
+                <label for="ph">pH</label>
+                <input id="ph" type="number" step="0.01" name="ph" required placeholder="e.g. 8.20">
+              </div>
+              <button type="submit">Save Test &amp; Recalculate</button>
+              <p class="hint">
+                Tip: Test every <span>~3 days</span> for best tuning. Extreme values are ignored for safety.
+              </p>
+            </form>
+          </div>
+        </div>
 
-<div class="card">
-<h2>Dosing (ml/day)</h2>
-<div id="dosing"></div>
-</div>
+        <!-- Right side: dosing summary -->
+        <div class="card">
+          <div class="card-inner">
+            <h2>Current Dosing Plan</h2>
+            <h3>Auto-adjusted ml / day</h3>
+            <div id="dosing" class="tags-row">
+              <!-- Filled by JS -->
+            </div>
+            <p class="hint">
+              Doses are spread across three daytime windows (9:30 · 12:30 · 15:30) with safety caps and
+              gradual adjustments to avoid shocking the reef.
+            </p>
+          </div>
+        </div>
+      </div>
 
-<div class="card">
-<h2>History</h2>
-<canvas id="paramsChart" height="120"></canvas>
-</div>
+      <!-- Chart -->
+      <div class="card chart-card">
+        <div class="card-inner">
+          <h2>Trend History</h2>
+          <h3>How your reef has been trending</h3>
+          <div class="chart-container">
+            <canvas id="paramsChart"></canvas>
+          </div>
+          <p class="hint">
+            Use this to spot trends in Alk, Ca, Mg, and pH over time. Each point is one manual test.
+          </p>
+        </div>
+      </div>
+
+      <footer>
+        <span>ESP32 · Reef AI Doser</span>
+      </footer>
+    </div>
+  </div>
 
 <script>
 async function update(){
   try {
     const res = await fetch('/api/history');
     const data = await res.json();
+
+    // ----- Dosing tags -----
     const dosingDiv = document.getElementById('dosing');
+    const k = data.dosing.kalk;
+    const a = data.dosing.afr;
+    const m = data.dosing.mg;
+
     dosingDiv.innerHTML = `
-      <span class="tag">Kalk: ${data.dosing.kalk.toFixed(1)}</span>
-      <span class="tag">AFR: ${data.dosing.afr.toFixed(1)}</span>
-      <span class="tag">Mg: ${data.dosing.mg.toFixed(1)}</span>
+      <div class="tag kalk">
+        <div class="tag-dot"></div>
+        <span>Kalkwasser</span>
+        <small>${k.toFixed(1)} ml / day</small>
+      </div>
+      <div class="tag afr">
+        <div class="tag-dot"></div>
+        <span>All-For-Reef</span>
+        <small>${a.toFixed(1)} ml / day</small>
+      </div>
+      <div class="tag mg">
+        <div class="tag-dot"></div>
+        <span>Magnesium</span>
+        <small>${m.toFixed(1)} ml / day</small>
+      </div>
     `;
 
+    // ----- History chart -----
     const tests = data.tests || [];
     const labels = [], ca = [], alk = [], mg = [], ph = [];
+
     if(tests.length > 0){
       const t0 = tests[0].t;
       tests.forEach(tp => {
-        labels.push(((tp.t - t0) / 86400).toFixed(1));
+        labels.push(((tp.t - t0) / 86400).toFixed(1)); // days since first test
         ca.push(tp.ca);
         alk.push(tp.alk);
         mg.push(tp.mg);
@@ -596,17 +968,68 @@ async function update(){
       data:{
         labels,
         datasets:[
-          {label:'Ca (ppm)', data:ca, borderWidth:1, yAxisID:'y'},
-          {label:'Mg (ppm)', data:mg, borderWidth:1, yAxisID:'y'},
-          {label:'Alk (dKH)', data:alk, borderWidth:1, yAxisID:'y1'},
-          {label:'pH', data:ph, borderWidth:1, yAxisID:'y1'}
+          {
+            label:'Ca (ppm)',
+            data:ca,
+            borderWidth:1,
+            tension:0.25,
+            yAxisID:'y'
+          },
+          {
+            label:'Mg (ppm)',
+            data:mg,
+            borderWidth:1,
+            tension:0.25,
+            yAxisID:'y'
+          },
+          {
+            label:'Alk (dKH)',
+            data:alk,
+            borderWidth:1,
+            tension:0.25,
+            yAxisID:'y1'
+          },
+          {
+            label:'pH',
+            data:ph,
+            borderWidth:1,
+            tension:0.25,
+            yAxisID:'y1'
+          }
         ]
       },
       options:{
         responsive:true,
+        maintainAspectRatio:false,
+        interaction: {
+          mode: 'index',
+          intersect: false
+        },
         scales:{
-          y:{type:'linear',position:'left',title:{display:true,text:'Ca / Mg'}},
-          y1:{type:'linear',position:'right',title:{display:true,text:'Alk / pH'}}
+          y:{
+            type:'linear',
+            position:'left',
+            title:{display:true,text:'Ca / Mg'},
+            grid: { color:'rgba(148,163,184,0.25)' },
+            ticks: { color:'#cbd5f5', font:{size:10} }
+          },
+          y1:{
+            type:'linear',
+            position:'right',
+            title:{display:true,text:'Alk / pH'},
+            grid: { drawOnChartArea:false },
+            ticks: { color:'#cbd5f5', font:{size:10} }
+          },
+          x:{
+            title:{display:true,text:'Days since first test'},
+            grid: { color:'rgba(148,163,184,0.22)' },
+            ticks: { color:'#cbd5f5', font:{size:9} }
+          }
+        },
+        plugins:{
+          legend:{
+            labels:{color:'#e2e8f0', font:{size:10}}
+          }
         }
       }
     });
@@ -621,6 +1044,7 @@ setInterval(update, 10000);
 </body>
 </html>
 )rawliteral";
+
 
 void handleRoot(){
   server.send_P(200, "text/html", MAIN_PAGE_HTML);
