@@ -3,6 +3,25 @@
 #include <WebServer.h>
 #include <math.h>
 #include <time.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
+
+// If MAIN_PAGE_HTML is defined in another file, this keeps it linking cleanly:
+// Simple placeholder page – ESP32 is now mainly a backend.
+// Your real UI lives on Firebase Hosting.
+const char MAIN_PAGE_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Reef Doser ESP32</title>
+  </head>
+  <body>
+    <h2>Reef Doser ESP32</h2>
+    <p>This ESP32 is online and controlled via Firebase.</p>
+  </body>
+</html>
+)rawliteral";
 
 // ===================== WIFI / NTP SETUP =====================
 
@@ -17,12 +36,34 @@ const char* NTP_SERVER     = "pool.ntp.org";
 const long  GMT_OFFSET_SEC = -6 * 3600;  // UTC-6 standard time
 const int   DST_OFFSET_SEC = 3600;       // DST +1h (simple)
 
+
+// ===================== FIREBASE (for resetAi command only) =====================
+
+const char* FIREBASE_DB_URL = "https://aidoser-default-rtdb.firebaseio.com";
+const char* DEVICE_ID       = "reefDoser1";   // 👈 make sure this matches your DB path
+
+WiFiClientSecure secureClient;
+
+// build full Firebase URL from a path (e.g. "/devices/reefDoser1/commands/resetAi")
+String firebaseUrl(const String& path) {
+  String url = String(FIREBASE_DB_URL);
+  if (!url.endsWith("/")) url += "/";
+  if (path.startsWith("/")) {
+    url += path.substring(1);
+  } else {
+    url += path;
+  }
+  if (!url.endsWith(".json")) url += ".json";
+  return url;
+}
+
+
 // ===================== TARGETS & TANK INFO =====================
 
 const float TARGET_ALK = 8.5f;      // dKH   eric 8.5
 const float TARGET_CA  = 450.0f;    // ppm   450
 const float TARGET_MG  = 1440.0f;   // ppm   1400
-const float TARGET_PH  = 8.3f;     // pH    8.3
+const float TARGET_PH  = 8.3f;      // pH    8.3
 
 // 300 gal × 3.78541 = 1135.6 L
 const float TANK_VOLUME_L = 1135.6f;
@@ -97,6 +138,9 @@ int historyCount = 0;
 TestPoint lastTest    = {0, 0, 0, 0, 0};
 TestPoint currentTest = {0, 0, 0, 0, 0};
 
+// For Firebase-based AI timing (used by resetAIState)
+uint64_t lastRemoteTestTimestampMs = 0;
+
 
 // ===================== DOSING SCHEDULE (REAL-TIME, 3 DOSES/DAY) =====================
 
@@ -123,7 +167,6 @@ bool slotDone[DOSE_SLOTS_PER_DAY] = {false, false, false};
 
 // ===================== IFTTT WEBHOOK SETUP =====================
 // Get your key from: https://ifttt.com/maker_webhooks
-// It will look like: https://maker.ifttt.com/use/<YOUR_KEY_HERE>
 
 const char* IFTTT_HOST = "maker.ifttt.com";
 const int   IFTTT_PORT = 80;
@@ -137,6 +180,7 @@ int sendIFTTT(String eventName,
               String value2 = "",
               String value3 = "");
 String getLocalTimeString();
+
 
 // ===================== HELPERS =====================
 
@@ -300,6 +344,41 @@ void enforceChemSafetyCaps() {
               "scale=" + String(scale, 3),
               getLocalTimeString());
   }
+}
+
+
+// ===================== AI RESET (LOCAL STATE) =====================
+
+void resetAIState() {
+  Serial.println("=== AI RESET requested ===");
+
+  // Clear test history in RAM
+  historyCount = 0;
+  memset(historyBuf, 0, sizeof(historyBuf));
+
+  // Clear last / current tests
+  lastTest    = {0, 0, 0, 0, 0};
+  currentTest = {0, 0, 0, 0, 0};
+
+  // Reset dosing back to your conservative defaults
+  dosing.ml_per_day_kalk = 2000.0f;  // 2L/day
+  dosing.ml_per_day_afr  = 20.0f;
+  dosing.ml_per_day_mg   = 0.0f;
+
+  // Reset safety / timing
+  lastSafetyBackoffTs = nowSeconds();
+  lastRemoteTestTimestampMs = 0;
+
+  // Recompute per-dose seconds
+  updatePumpSchedules();
+
+  // Optional: notify IFTTT
+  sendIFTTT("reef_ai_reset",
+            "AI dosing engine reset",
+            WiFi.localIP().toString(),
+            getLocalTimeString());
+
+  Serial.println("AI state reset complete.");
 }
 
 
@@ -521,530 +600,82 @@ void maybeDosePumpsRealTime(){
 }
 
 
-// ===================== WEB UI (HTML + API) =====================
+// ===================== FIREBASE: CHECK resetAi COMMAND =====================
 
-const char MAIN_PAGE_HTML[] PROGMEM = R"rawliteral(
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Reef AI Doser</title>
-<style>
-  :root {
-    --bg: #020817;
-    --bg-card: rgba(15, 23, 42, 0.96);
-    --accent: #22d3ee;
-    --accent-soft: rgba(56, 189, 248, 0.18);
-    --accent-strong: #38bdf8;
-    --text: #e2e8f0;
-    --text-soft: #94a3b8;
-    --border: rgba(148, 163, 184, 0.35);
-    --danger: #f97373;
-    --success: #4ade80;
+// Check /devices/{DEVICE_ID}/commands/resetAi
+// If true, reset AI and clear the flag.
+// Returns true if a reset was performed.
+bool firebaseCheckAndHandleResetAi() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return false;
   }
 
-  * {
-    box-sizing: border-box;
+  HTTPClient https;
+
+  String path = "/devices/" + String(DEVICE_ID) + "/commands/resetAi";
+  String url  = firebaseUrl(path);
+
+  Serial.print("Firebase GET resetAi: ");
+  Serial.println(url);
+
+  if (!https.begin(secureClient, url)) {
+    Serial.println("https.begin() failed (resetAi)");
+    return false;
   }
 
-  body {
-    margin: 0;
-    min-height: 100vh;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", Arial, sans-serif;
-    background: radial-gradient(circle at top, #0ea5e9 0, #020617 40%, #020617 100%);
-    color: var(--text);
-    display: flex;
-    justify-content: center;
-    padding: 16px;
+  int httpCode = https.GET();
+  if (httpCode != HTTP_CODE_OK) {
+    Serial.print("HTTP GET resetAi error: ");
+    Serial.println(httpCode);
+    https.end();
+    return false;
   }
 
-  .shell {
-    width: 100%;
-    max-width: 900px;
+  String payload = https.getString();
+  https.end();
+
+  Serial.print("resetAi payload: ");
+  Serial.println(payload);
+
+  // No node yet
+  if (payload == "null" || payload.length() == 0) {
+    return false;
   }
 
-  .glass-panel {
-    background: linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.96));
-    border-radius: 18px;
-    border: 1px solid rgba(148, 163, 184, 0.3);
-    box-shadow:
-      0 24px 60px rgba(15, 23, 42, 0.9),
-      0 0 0 1px rgba(15, 23, 42, 0.7);
-    padding: 18px 16px 22px;
-    backdrop-filter: blur(18px);
-  }
+  // If it's literally true (could be true or "true")
+  if (payload.indexOf("true") != -1) {
+    // Perform reset
+    resetAIState();
 
-  @media (min-width: 640px) {
-    .glass-panel {
-      padding: 22px 24px 26px;
-    }
-  }
+    // Clear the flag back to false
+    HTTPClient https2;
+    String url2 = firebaseUrl(path);
 
-  header {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-bottom: 18px;
-    flex-wrap: wrap;
-  }
-
-  .reef-icon {
-    width: 42px;
-    height: 42px;
-    border-radius: 999px;
-    background: radial-gradient(circle at 30% 20%, #e0f2fe, #0ea5e9 40%, #0369a1 70%, #020617 100%);
-    box-shadow:
-      0 0 0 2px rgba(8, 47, 73, 0.8),
-      0 12px 26px rgba(12, 74, 110, 0.7);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .reef-icon-wave {
-    width: 70%;
-    height: 70%;
-    border-radius: 50%;
-    border: 2px solid rgba(226, 232, 240, 0.9);
-    border-top-color: transparent;
-    border-left-color: transparent;
-    transform: rotate(25deg);
-  }
-
-  header h1 {
-    font-size: 1.4rem;
-    letter-spacing: 0.03em;
-    margin: 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  header h1 span.highlight {
-    color: var(--accent);
-  }
-
-  header p {
-    margin: 0;
-    font-size: 0.8rem;
-    color: var(--text-soft);
-  }
-
-  .pill-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 6px;
-  }
-
-  .pill {
-    font-size: 0.7rem;
-    padding: 4px 8px;
-    border-radius: 999px;
-    border: 1px solid rgba(148, 163, 184, 0.35);
-    color: var(--text-soft);
-    background: rgba(15, 23, 42, 0.9);
-  }
-
-  .pill.accent {
-    border-color: rgba(34, 211, 238, 0.8);
-    background: radial-gradient(circle at 20% 0%, rgba(56, 189, 248, 0.25), rgba(15, 23, 42, 0.85));
-    color: var(--accent);
-  }
-
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 14px;
-  }
-
-  @media (min-width: 768px) {
-    .grid {
-      grid-template-columns: minmax(0,1.1fr) minmax(0,1fr);
-    }
-  }
-
-  .card {
-    border-radius: 14px;
-    border: 1px solid var(--border);
-    background: linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.98));
-    padding: 14px 14px 16px;
-    position: relative;
-    overflow: hidden;
-  }
-
-  .card::before {
-    content: "";
-    position: absolute;
-    inset: -40%;
-    background:
-      radial-gradient(circle at 0% 0%, var(--accent-soft), transparent 55%),
-      radial-gradient(circle at 100% 100%, rgba(59,130,246,0.12), transparent 55%);
-    opacity: 0.55;
-    pointer-events: none;
-  }
-
-  .card-inner {
-    position: relative;
-    z-index: 1;
-  }
-
-  .card h2 {
-    font-size: 0.95rem;
-    margin: 0 0 8px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--text-soft);
-  }
-
-  .card h3 {
-    font-size: 0.9rem;
-    margin: 0 0 10px;
-    color: var(--accent-strong);
-  }
-
-  .field {
-    margin-bottom: 8px;
-  }
-
-  .field label {
-    display: block;
-    font-size: 0.75rem;
-    color: var(--text-soft);
-    margin-bottom: 3px;
-  }
-
-  .field input {
-    width: 100%;
-    border-radius: 8px;
-    border: 1px solid rgba(148, 163, 184, 0.55);
-    background: rgba(15, 23, 42, 0.9);
-    color: var(--text);
-    font-size: 0.85rem;
-    padding: 7px 9px;
-    outline: none;
-  }
-
-  .field input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.4);
-  }
-
-  button[type="submit"] {
-    margin-top: 6px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 8px 14px;
-    font-size: 0.85rem;
-    border-radius: 999px;
-    border: none;
-    background: radial-gradient(circle at 10% 0%, #22d3ee, #1d4ed8);
-    color: #eff6ff;
-    cursor: pointer;
-    box-shadow:
-      0 10px 22px rgba(37, 99, 235, 0.6),
-      0 0 0 1px rgba(30, 64, 175, 0.5);
-  }
-
-  button[type="submit"]:active {
-    transform: translateY(1px);
-    box-shadow:
-      0 6px 18px rgba(37, 99, 235, 0.6),
-      0 0 0 1px rgba(30, 64, 175, 0.6);
-  }
-
-  .tags-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 6px;
-  }
-
-  .tag {
-    font-size: 0.75rem;
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: rgba(15, 23, 42, 0.95);
-    border: 1px solid rgba(148, 163, 184, 0.5);
-    color: var(--text-soft);
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .tag-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 999px;
-    background: var(--accent);
-  }
-
-  .tag.kalk .tag-dot {
-    background: #f97316;
-  }
-
-  .tag.afr .tag-dot {
-    background: #a855f7;
-  }
-
-  .tag.mg .tag-dot {
-    background: #22c55e;
-  }
-
-  .tag small {
-    font-size: 0.7rem;
-    color: var(--text-soft);
-  }
-
-  .hint {
-    font-size: 0.7rem;
-    color: var(--text-soft);
-    margin-top: 6px;
-  }
-
-  .hint span {
-    color: var(--accent);
-  }
-
-  .chart-card {
-    margin-top: 14px;
-  }
-
-  .chart-container {
-    width: 100%;
-    max-height: 260px;
-  }
-
-  footer {
-    margin-top: 10px;
-    font-size: 0.7rem;
-    color: var(--text-soft);
-    text-align: right;
-  }
-
-  footer span {
-    color: var(--accent-soft);
-  }
-</style>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
-<body>
-  <div class="shell">
-    <div class="glass-panel">
-      <header>
-        <div class="reef-icon">
-          <div class="reef-icon-wave"></div>
-        </div>
-        <div>
-          <h1>
-            Reef<span class="highlight">AI</span> Doser
-          </h1>
-          <p>Adaptive dosing for your reef — tuned by your test results.</p>
-          <div class="pill-row">
-            <div class="pill accent">300 gal system</div>
-            <div class="pill">Targets: Alk 9 · Ca 420 · Mg 1440 · pH 8.2</div>
-          </div>
-        </div>
-      </header>
-
-      <div class="grid">
-        <!-- Left side: test form -->
-        <div class="card">
-          <div class="card-inner">
-            <h2>New Test</h2>
-            <h3>Update tank parameters</h3>
-            <form method="POST" action="/submit_test">
-              <div class="field">
-                <label for="ca">Calcium (ppm)</label>
-                <input id="ca" type="number" step="0.1" name="ca" required placeholder="e.g. 420">
-              </div>
-              <div class="field">
-                <label for="alk">Alkalinity (dKH)</label>
-                <input id="alk" type="number" step="0.01" name="alk" required placeholder="e.g. 9.0">
-              </div>
-              <div class="field">
-                <label for="mg">Magnesium (ppm)</label>
-                <input id="mg" type="number" step="1" name="mg" required placeholder="e.g. 1440">
-              </div>
-              <div class="field">
-                <label for="ph">pH</label>
-                <input id="ph" type="number" step="0.01" name="ph" required placeholder="e.g. 8.20">
-              </div>
-              <button type="submit">Save Test &amp; Recalculate</button>
-              <p class="hint">
-                Tip: Test every <span>~3 days</span> for best tuning. Extreme values are ignored for safety.
-              </p>
-            </form>
-          </div>
-        </div>
-
-        <!-- Right side: dosing summary -->
-        <div class="card">
-          <div class="card-inner">
-            <h2>Current Dosing Plan</h2>
-            <h3>Auto-adjusted ml / day</h3>
-            <div id="dosing" class="tags-row">
-              <!-- Filled by JS -->
-            </div>
-            <p class="hint">
-              Doses are spread across three daytime windows (9:30 · 12:30 · 15:30) with safety caps and
-              gradual adjustments to avoid shocking the reef.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Chart -->
-      <div class="card chart-card">
-        <div class="card-inner">
-          <h2>Trend History</h2>
-          <h3>How your reef has been trending</h3>
-          <div class="chart-container">
-            <canvas id="paramsChart"></canvas>
-          </div>
-          <p class="hint">
-            Use this to spot trends in Alk, Ca, Mg, and pH over time. Each point is one manual test.
-          </p>
-        </div>
-      </div>
-
-      <footer>
-        <span>ESP32 · Reef AI Doser</span>
-      </footer>
-    </div>
-  </div>
-
-<script>
-async function update(){
-  try {
-    const res = await fetch('/api/history');
-    const data = await res.json();
-
-    // ----- Dosing tags -----
-    const dosingDiv = document.getElementById('dosing');
-    const k = data.dosing.kalk;
-    const a = data.dosing.afr;
-    const m = data.dosing.mg;
-
-    dosingDiv.innerHTML = `
-      <div class="tag kalk">
-        <div class="tag-dot"></div>
-        <span>Kalkwasser</span>
-        <small>${k.toFixed(1)} ml / day</small>
-      </div>
-      <div class="tag afr">
-        <div class="tag-dot"></div>
-        <span>All-For-Reef</span>
-        <small>${a.toFixed(1)} ml / day</small>
-      </div>
-      <div class="tag mg">
-        <div class="tag-dot"></div>
-        <span>Magnesium</span>
-        <small>${m.toFixed(1)} ml / day</small>
-      </div>
-    `;
-
-    // ----- History chart -----
-    const tests = data.tests || [];
-    const labels = [], ca = [], alk = [], mg = [], ph = [];
-
-    if(tests.length > 0){
-      const t0 = tests[0].t;
-      tests.forEach(tp => {
-        labels.push(((tp.t - t0) / 86400).toFixed(1)); // days since first test
-        ca.push(tp.ca);
-        alk.push(tp.alk);
-        mg.push(tp.mg);
-        ph.push(tp.ph);
-      });
+    if (!https2.begin(secureClient, url2)) {
+      Serial.println("https.begin() failed (clear resetAi)");
+      return true;  // we *did* reset locally, even if DB didn't clear
     }
 
-    const ctx = document.getElementById('paramsChart').getContext('2d');
-    if(window.c) window.c.destroy();
-    window.c = new Chart(ctx,{
-      type:'line',
-      data:{
-        labels,
-        datasets:[
-          {
-            label:'Ca (ppm)',
-            data:ca,
-            borderWidth:1,
-            tension:0.25,
-            yAxisID:'y'
-          },
-          {
-            label:'Mg (ppm)',
-            data:mg,
-            borderWidth:1,
-            tension:0.25,
-            yAxisID:'y'
-          },
-          {
-            label:'Alk (dKH)',
-            data:alk,
-            borderWidth:1,
-            tension:0.25,
-            yAxisID:'y1'
-          },
-          {
-            label:'pH',
-            data:ph,
-            borderWidth:1,
-            tension:0.25,
-            yAxisID:'y1'
-          }
-        ]
-      },
-      options:{
-        responsive:true,
-        maintainAspectRatio:false,
-        interaction: {
-          mode: 'index',
-          intersect: false
-        },
-        scales:{
-          y:{
-            type:'linear',
-            position:'left',
-            title:{display:true,text:'Ca / Mg'},
-            grid: { color:'rgba(148,163,184,0.25)' },
-            ticks: { color:'#cbd5f5', font:{size:10} }
-          },
-          y1:{
-            type:'linear',
-            position:'right',
-            title:{display:true,text:'Alk / pH'},
-            grid: { drawOnChartArea:false },
-            ticks: { color:'#cbd5f5', font:{size:10} }
-          },
-          x:{
-            title:{display:true,text:'Days since first test'},
-            grid: { color:'rgba(148,163,184,0.22)' },
-            ticks: { color:'#cbd5f5', font:{size:9} }
-          }
-        },
-        plugins:{
-          legend:{
-            labels:{color:'#e2e8f0', font:{size:10}}
-          }
-        }
-      }
-    });
-  } catch(e){
-    console.error(e);
+    https2.addHeader("Content-Type", "application/json");
+    int code2 = https2.PUT("false");
+    if (code2 != HTTP_CODE_OK && code2 != HTTP_CODE_NO_CONTENT) {
+      Serial.print("HTTP PUT clear resetAi error: ");
+      Serial.println(code2);
+      String resp2 = https2.getString();
+      Serial.println(resp2);
+    }
+    https2.end();
+
+    Serial.println("resetAi flag cleared in Firebase.");
+    return true;
   }
+
+  // Anything else (false, etc.)
+  return false;
 }
 
-update();
-setInterval(update, 10000);
-</script>
-</body>
-</html>
-)rawliteral";
 
+// ===================== HTTP HANDLERS =====================
 
 void handleRoot(){
   server.send_P(200, "text/html", MAIN_PAGE_HTML);
@@ -1124,6 +755,9 @@ void setup(){
   Serial.print("Connected, IP address: ");
   Serial.println(WiFi.localIP());
 
+  // Allow insecure HTTPS for Firebase
+  secureClient.setInsecure();
+
   // NTP time sync
   configTime(GMT_OFFSET_SEC, DST_OFFSET_SEC, NTP_SERVER);
   struct tm timeinfo;
@@ -1154,4 +788,12 @@ void loop(){
 
   // Dose at 3 scheduled time slots per day
   maybeDosePumpsRealTime();
+
+  // Periodically poll Firebase for resetAi command (every ~60s)
+  static unsigned long lastResetPollMs = 0;
+  unsigned long nowMs = millis();
+  if (nowMs - lastResetPollMs >= 60000UL) {
+    lastResetPollMs = nowMs;
+    firebaseCheckAndHandleResetAi();
+  }
 }
