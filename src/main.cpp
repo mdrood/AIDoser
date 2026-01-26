@@ -1,10 +1,13 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiManager.h>
 #include <WebServer.h>
 #include <math.h>
 #include <time.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <Update.h>
+#include <stdint.h>
 
 // If MAIN_PAGE_HTML is defined in another file, this keeps it linking cleanly:
 // Simple placeholder page – ESP32 is now mainly a backend.
@@ -26,8 +29,9 @@ const char MAIN_PAGE_HTML[] PROGMEM = R"rawliteral(
 // ===================== WIFI / NTP SETUP =====================
 
 // CHANGE THESE TO YOUR HOME WIFI
-const char* WIFI_SSID     = "roods";
-const char* WIFI_PASSWORD = "Frinov25!+!";
+//const char* WIFI_SSID     = "roods";
+//const char* WIFI_PASSWORD = "Frinov25!+!";
+WiFiManager wm;
 
 WebServer server(80);
 
@@ -37,24 +41,132 @@ const long  GMT_OFFSET_SEC = -6 * 3600;  // UTC-6 standard time
 const int   DST_OFFSET_SEC = 3600;       // DST +1h (simple)
 
 
-// ===================== FIREBASE (for resetAi command only) =====================
+// ===================== FIREBASE (REST API) =====================
 
 const char* FIREBASE_DB_URL = "https://aidoser-default-rtdb.firebaseio.com";
-const char* DEVICE_ID       = "reefDoser1";   // 👈 make sure this matches your DB path
+const char* DEVICE_ID       = "reefDoser1";   // 👈 must match your DB path
+const char* FW_VERSION      = "1.0.0-esp32";  // 👈 bump when you flash new firmware
 
 WiFiClientSecure secureClient;
 
-// build full Firebase URL from a path (e.g. "/devices/reefDoser1/commands/resetAi")
+// Build full Firebase URL from a path (e.g. "/devices/reefDoser1/commands/resetAi")
 String firebaseUrl(const String& path) {
   String url = String(FIREBASE_DB_URL);
   if (!url.endsWith("/")) url += "/";
+
   if (path.startsWith("/")) {
     url += path.substring(1);
   } else {
     url += path;
   }
-  if (!url.endsWith(".json")) url += ".json";
+
+  if (!url.endsWith(".json")) {
+    url += ".json";
+  }
   return url;
+}
+
+// Simple PUT JSON helper
+bool firebasePutJson(const String& path, const String& jsonBody) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Firebase PUT: WiFi not connected");
+    return false;
+  }
+
+  HTTPClient https;
+  String url = firebaseUrl(path);
+
+  Serial.print("Firebase PUT: ");
+  Serial.println(url);
+  Serial.print("Body: ");
+  Serial.println(jsonBody);
+
+  if (!https.begin(secureClient, url)) {
+    Serial.println("Firebase PUT begin() failed");
+    return false;
+  }
+
+  https.addHeader("Content-Type", "application/json");
+  int code = https.PUT(jsonBody);
+  if (code != HTTP_CODE_OK && code != HTTP_CODE_NO_CONTENT) {
+    Serial.print("Firebase PUT error code: ");
+    Serial.println(code);
+    String resp = https.getString();
+    Serial.println(resp);
+    https.end();
+    return false;
+  }
+
+  https.end();
+  return true;
+}
+
+// Simple POST JSON helper (for alerts, pushes, etc.)
+bool firebasePostJson(const String& path, const String& jsonBody) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Firebase POST: WiFi not connected");
+    return false;
+  }
+
+  HTTPClient https;
+  String url = firebaseUrl(path);
+
+  Serial.print("Firebase POST: ");
+  Serial.println(url);
+  Serial.print("Body: ");
+  Serial.println(jsonBody);
+
+  if (!https.begin(secureClient, url)) {
+    Serial.println("Firebase POST begin() failed");
+    return false;
+  }
+
+  https.addHeader("Content-Type", "application/json");
+  int code = https.POST(jsonBody);
+  if (code != HTTP_CODE_OK && code != HTTP_CODE_NO_CONTENT) {
+    Serial.print("Firebase POST error code: ");
+    Serial.println(code);
+    String resp = https.getString();
+    Serial.println(resp);
+    https.end();
+    return false;
+  }
+
+  https.end();
+  return true;
+}
+
+
+// Simple GET helper (returns body or empty string)
+String firebaseGetJson(const String& path) {
+  String result;
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Firebase GET: WiFi not connected");
+    return result;
+  }
+
+  HTTPClient https;
+  String url = firebaseUrl(path);
+
+  Serial.print("Firebase GET: ");
+  Serial.println(url);
+
+  if (!https.begin(secureClient, url)) {
+    Serial.println("Firebase GET begin() failed");
+    return result;
+  }
+
+  int code = https.GET();
+  if (code != HTTP_CODE_OK) {
+    Serial.print("Firebase GET error code: ");
+    Serial.println(code);
+    https.end();
+    return result;
+  }
+
+  result = https.getString();
+  https.end();
+  return result;
 }
 
 
@@ -138,7 +250,7 @@ int historyCount = 0;
 TestPoint lastTest    = {0, 0, 0, 0, 0};
 TestPoint currentTest = {0, 0, 0, 0, 0};
 
-// For Firebase-based AI timing (used by resetAIState)
+// For Firebase-based AI timing (if we later pull tests from RTDB)
 uint64_t lastRemoteTestTimestampMs = 0;
 
 
@@ -174,11 +286,12 @@ const int   IFTTT_PORT = 80;
 // 🔴 REPLACE THIS with your actual Maker key
 const char* IFTTT_KEY = "fBplW8jJqqotTqTxck4oTdK_oHTJKAawKfja-WlcgW-";
 
-// Forward declarations
-int sendIFTTT(String eventName,
-              String value1 = "",
-              String value2 = "",
-              String value3 = "");
+// Forward declaration (IFTTT no longer used; kept for reference)
+// int sendIFTTT(String eventName,
+//               String value1 = "",
+//               String value2 = "",
+//               String value3 = "");
+
 String getLocalTimeString();
 
 
@@ -230,12 +343,14 @@ void pushHistory(const TestPoint& tp){
 }
 
 
-// ===================== IFTTT HELPERS =====================
+// ===================== IFTTT HELPERS (LEGACY, NOT USED) =====================
 
-int sendIFTTT(String eventName,
-              String value1,
-              String value2,
-              String value3) {
+// int sendIFTTT(String eventName,
+//               String value1,
+//               String value2,
+//               String value3) {
+
+/*
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("IFTTT: WiFi not connected");
     return -1;
@@ -281,8 +396,9 @@ int sendIFTTT(String eventName,
   Serial.print(eventName);
   Serial.println(" sent");
 
-  return 0;
-}
+  // return 0;
+}*/
+// )LEGACY
 
 String getLocalTimeString() {
   struct tm timeinfo;
@@ -294,6 +410,45 @@ String getLocalTimeString() {
   return String(buf);
 }
 
+
+// ===================== SAFETY: CHEMISTRY
+
+// Helper: get a best-effort timestamp in ms since epoch
+uint64_t getEpochMillis() {
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo)) {
+    time_t t = mktime(&timeinfo);
+    if (t > 0) {
+      return (uint64_t)t * 1000ULL;
+    }
+  }
+  // Fallback to millis() if we don't have real time yet
+  return (uint64_t)millis();
+}
+
+// Helper: push an alert into Firebase RTDB under /devices/{DEVICE_ID}/alerts
+// This replaces the old IFTTT push usage – your Cloud Function can listen
+// to /devices/{deviceId}/alerts and fan out SMS / email.
+void firebasePushAlert(const String& type,
+                       const String& title,
+                       const String& body,
+                       const String& extra) {
+  String path = "/devices/" + String(DEVICE_ID) + "/alerts";
+
+  uint64_t ts = getEpochMillis();
+
+  // Build a small JSON object
+  String json = "{";
+  json += "\"type\":\"" + type + "\"";
+  json += ",\"title\":\"" + title + "\"";
+  json += ",\"body\":\"" + body + "\"";
+  json += ",\"extra\":\"" + extra + "\"";
+  json += ",\"deviceId\":\"" + String(DEVICE_ID) + "\"";
+  json += ",\"timestamp\":" + String((unsigned long long)ts);
+  json += "}";
+
+  firebasePostJson(path, json);
+}
 
 // ===================== SAFETY: CHEMISTRY-BASED CAPS =====================
 
@@ -338,11 +493,11 @@ void enforceChemSafetyCaps() {
     Serial.print("SAFETY: Scaling dosing by ");
     Serial.println(scale, 3);
 
-    // IFTTT alert: dosing scaled by safety
-    sendIFTTT("reef_dose_scaled",
-              "Dosing scaled by safety",
-              "scale=" + String(scale, 3),
-              getLocalTimeString());
+    // Firebase alert: dosing scaled by safety
+    firebasePushAlert("safety",
+                      "Dosing scaled by safety",
+                      "scale=" + String(scale, 3),
+                      getLocalTimeString());
   }
 }
 
@@ -372,11 +527,11 @@ void resetAIState() {
   // Recompute per-dose seconds
   updatePumpSchedules();
 
-  // Optional: notify IFTTT
-  sendIFTTT("reef_ai_reset",
-            "AI dosing engine reset",
-            WiFi.localIP().toString(),
-            getLocalTimeString());
+  // Optional: Firebase alert for AI reset
+  firebasePushAlert("reset",
+                    "AI dosing engine reset",
+                    WiFi.localIP().toString(),
+                    getLocalTimeString());
 
   Serial.println("AI state reset complete.");
 }
@@ -509,11 +664,11 @@ void safetyBackoffIfNoTests() {
 
   lastSafetyBackoffTs = now;
 
-  // IFTTT alert: no tests + backoff
-  sendIFTTT("reef_no_tests_backoff",
-            "No tests >5 days",
-            "Dosing backed off to 70%",
-            getLocalTimeString());
+  // Firebase alert: no tests + backoff
+  firebasePushAlert("safety",
+                    "No tests >5 days",
+                    "Dosing backed off to 70%",
+                    getLocalTimeString());
 }
 
 
@@ -567,31 +722,31 @@ void maybeDosePumpsRealTime(){
       Serial.print("Dosing slot ");
       Serial.println(i);
 
-      // --- Kalk dose & IFTTT ---
+      // --- Kalk dose & Firebase alert ---
       if (SEC_PER_DOSE_KALK > 0.0f && mlPerDoseKalk > 0.0f) {
         giveDose(PIN_PUMP_KALK, SEC_PER_DOSE_KALK);
-        sendIFTTT("reef_dose_kalk",
-                  "Kalk",
-                  String(mlPerDoseKalk, 1) + " ml",
-                  timeStr);
+        firebasePushAlert("dose",
+                          "Kalk dose",
+                          String(mlPerDoseKalk, 1) + " ml",
+                          timeStr);
       }
 
       // --- AFR dose & IFTTT ---
       if (SEC_PER_DOSE_AFR > 0.0f && mlPerDoseAfr > 0.0f) {
         giveDose(PIN_PUMP_AFR, SEC_PER_DOSE_AFR);
-        sendIFTTT("reef_dose_afr",
-                  "AllForReef",
-                  String(mlPerDoseAfr, 1) + " ml",
-                  timeStr);
+        firebasePushAlert("dose",
+                          "AllForReef dose",
+                          String(mlPerDoseAfr, 1) + " ml",
+                          timeStr);
       }
 
-      // --- Mg dose & IFTTT ---
+      // --- Mg dose & Firebase alert ---
       if (SEC_PER_DOSE_MG > 0.0f && mlPerDoseMg > 0.0f) {
         giveDose(PIN_PUMP_MG, SEC_PER_DOSE_MG);
-        sendIFTTT("reef_dose_mg",
-                  "Magnesium",
-                  String(mlPerDoseMg, 1) + " ml",
-                  timeStr);
+        firebasePushAlert("dose",
+                          "Magnesium dose",
+                          String(mlPerDoseMg, 1) + " ml",
+                          timeStr);
       }
 
       slotDone[i] = true;
@@ -600,7 +755,7 @@ void maybeDosePumpsRealTime(){
 }
 
 
-// ===================== FIREBASE: CHECK resetAi COMMAND =====================
+// ===================== FIREBASE: resetAi COMMAND =====================
 
 // Check /devices/{DEVICE_ID}/commands/resetAi
 // If true, reset AI and clear the flag.
@@ -610,37 +765,14 @@ bool firebaseCheckAndHandleResetAi() {
     return false;
   }
 
-  HTTPClient https;
-
   String path = "/devices/" + String(DEVICE_ID) + "/commands/resetAi";
-  String url  = firebaseUrl(path);
-
-  Serial.print("Firebase GET resetAi: ");
-  Serial.println(url);
-
-  if (!https.begin(secureClient, url)) {
-    Serial.println("https.begin() failed (resetAi)");
+  String payload = firebaseGetJson(path);
+  if (payload.length() == 0 || payload == "null") {
     return false;
   }
-
-  int httpCode = https.GET();
-  if (httpCode != HTTP_CODE_OK) {
-    Serial.print("HTTP GET resetAi error: ");
-    Serial.println(httpCode);
-    https.end();
-    return false;
-  }
-
-  String payload = https.getString();
-  https.end();
 
   Serial.print("resetAi payload: ");
   Serial.println(payload);
-
-  // No node yet
-  if (payload == "null" || payload.length() == 0) {
-    return false;
-  }
 
   // If it's literally true (could be true or "true")
   if (payload.indexOf("true") != -1) {
@@ -648,34 +780,324 @@ bool firebaseCheckAndHandleResetAi() {
     resetAIState();
 
     // Clear the flag back to false
-    HTTPClient https2;
-    String url2 = firebaseUrl(path);
-
-    if (!https2.begin(secureClient, url2)) {
-      Serial.println("https.begin() failed (clear resetAi)");
-      return true;  // we *did* reset locally, even if DB didn't clear
-    }
-
-    https2.addHeader("Content-Type", "application/json");
-    int code2 = https2.PUT("false");
-    if (code2 != HTTP_CODE_OK && code2 != HTTP_CODE_NO_CONTENT) {
-      Serial.print("HTTP PUT clear resetAi error: ");
-      Serial.println(code2);
-      String resp2 = https2.getString();
-      Serial.println(resp2);
-    }
-    https2.end();
-
+    firebasePutJson(path, "false");
     Serial.println("resetAi flag cleared in Firebase.");
     return true;
   }
 
-  // Anything else (false, etc.)
   return false;
 }
 
 
-// ===================== HTTP HANDLERS =====================
+// ===================== FIREBASE: Live Dose COMMAND =====================
+
+// Perform one "live" dose using current per-day plan (one of the 3 doses)
+void runLiveDoseOnce() {
+  float mlPerDoseKalk = (DOSES_PER_DAY_KALK > 0) ? (dosing.ml_per_day_kalk / DOSES_PER_DAY_KALK) : 0.0f;
+  float mlPerDoseAfr  = (DOSES_PER_DAY_AFR  > 0) ? (dosing.ml_per_day_afr  / DOSES_PER_DAY_AFR ) : 0.0f;
+  float mlPerDoseMg   = (DOSES_PER_DAY_MG   > 0) ? (dosing.ml_per_day_mg   / DOSES_PER_DAY_MG  ) : 0.0f;
+
+  String timeStr = getLocalTimeString();
+
+  Serial.println("=== LIVE DOSE REQUESTED ===");
+
+  if (SEC_PER_DOSE_KALK > 0.0f && mlPerDoseKalk > 0.0f) {
+    giveDose(PIN_PUMP_KALK, SEC_PER_DOSE_KALK);
+    firebasePushAlert("dose",
+                      "LiveDose-Kalk",
+                      String(mlPerDoseKalk, 1) + " ml",
+                      timeStr);
+  }
+  if (SEC_PER_DOSE_AFR > 0.0f && mlPerDoseAfr > 0.0f) {
+    giveDose(PIN_PUMP_AFR, SEC_PER_DOSE_AFR);
+    firebasePushAlert("dose",
+                      "LiveDose-AFR",
+                      String(mlPerDoseAfr, 1) + " ml",
+                      timeStr);
+  }
+  if (SEC_PER_DOSE_MG > 0.0f && mlPerDoseMg > 0.0f) {
+    giveDose(PIN_PUMP_MG, SEC_PER_DOSE_MG);
+    firebasePushAlert("dose",
+                      "LiveDose-Mg",
+                      String(mlPerDoseMg, 1) + " ml",
+                      timeStr);
+  }
+
+  Serial.println("=== LIVE DOSE COMPLETE ===");
+}
+
+// Check /devices/{DEVICE_ID}/commands/liveDose
+bool firebaseCheckAndHandleLiveDose() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return false;
+  }
+
+  String path = "/devices/" + String(DEVICE_ID) + "/commands/liveDose";
+  String payload = firebaseGetJson(path);
+  if (payload.length() == 0 || payload == "null") {
+    return false;
+  }
+
+  Serial.print("liveDose payload: ");
+  Serial.println(payload);
+
+  // Look for "trigger":true
+  int trigIdx = payload.indexOf("\"trigger\"");
+  if (trigIdx < 0) return false;
+  int colonIdx = payload.indexOf(':', trigIdx);
+  if (colonIdx < 0) return false;
+  String valStr = payload.substring(colonIdx + 1);
+  valStr.trim();
+
+  bool trigger = false;
+  // Accept true, true, or true}
+  if (valStr.startsWith("true") || valStr.startsWith(" true")) {
+    trigger = true;
+  }
+
+  if (!trigger) return false;
+
+  // Run live dose
+  runLiveDoseOnce();
+
+  // Clear / annotate command
+  time_t nowSec = time(NULL);
+  uint64_t tsMs = (nowSec > 0) ? (uint64_t)nowSec * 1000ULL : (uint64_t)millis();
+
+  String clearJson = "{";
+  clearJson += "\"trigger\":false,";
+  clearJson += "\"lastRun\":" + String((unsigned long long)tsMs);
+  clearJson += "}";
+
+  firebasePutJson(path, clearJson);
+
+  return true;
+}
+
+
+// ===================== FIREBASE: OTA STATUS & REQUEST =====================
+
+void firebaseSetOtaStatus(const String& status, const String& error) {
+  String path = "/devices/" + String(DEVICE_ID) + "/otaStatus";
+
+  time_t nowSec = time(NULL);
+  uint64_t tsMs = (nowSec > 0) ? (uint64_t)nowSec * 1000ULL : (uint64_t)millis();
+
+  String json = "{";
+  json += "\"status\":\"" + status + "\"";
+  if (error.length() > 0) {
+    json += ",\"error\":\"" + error + "\"";
+  }
+  json += ",\"updatedAt\":" + String((unsigned long long)tsMs);
+  json += "}";
+
+  firebasePutJson(path, json);
+}
+
+// Perform OTA from a HTTPS URL
+bool performOtaFromUrl(const String& url) {
+  firebaseSetOtaStatus("starting", "");
+
+  if (WiFi.status() != WL_CONNECTED) {
+    firebaseSetOtaStatus("error", "WiFi not connected");
+    return false;
+  }
+
+  WiFiClientSecure otaClient;
+  otaClient.setInsecure();
+
+  HTTPClient https;
+  Serial.print("Starting OTA from URL: ");
+  Serial.println(url);
+
+  if (!https.begin(otaClient, url)) {
+    Serial.println("OTA: https.begin failed");
+    firebaseSetOtaStatus("error", "https.begin failed");
+    return false;
+  }
+
+  int httpCode = https.GET();
+  if (httpCode != HTTP_CODE_OK) {
+    Serial.print("OTA: HTTP GET failed, code=");
+    Serial.println(httpCode);
+    firebaseSetOtaStatus("error", "HTTP code " + String(httpCode));
+    https.end();
+    return false;
+  }
+
+  int contentLength = https.getSize();
+  if (contentLength <= 0) {
+    Serial.println("OTA: Content-Length not set");
+    firebaseSetOtaStatus("error", "Content length not set");
+    https.end();
+    return false;
+  }
+
+  firebaseSetOtaStatus("downloading", "");
+
+  bool canBegin = Update.begin(contentLength);
+  if (!canBegin) {
+    Serial.println("OTA: Not enough space for update");
+    firebaseSetOtaStatus("error", "Not enough space");
+    https.end();
+    return false;
+  }
+
+  WiFiClient * stream = https.getStreamPtr();
+  size_t written = Update.writeStream(*stream);
+  if (written != (size_t)contentLength) {
+    Serial.print("OTA: Written only ");
+    Serial.print(written);
+    Serial.print(" / ");
+    Serial.println(contentLength);
+    firebaseSetOtaStatus("error", "WriteStream mismatch");
+    https.end();
+    return false;
+  }
+
+  if (!Update.end()) {
+    Serial.print("OTA: Update.end() error: ");
+    Serial.println(Update.getError());
+    firebaseSetOtaStatus("error", "Update.end failed");
+    https.end();
+    return false;
+  }
+
+  https.end();
+
+  if (!Update.isFinished()) {
+    Serial.println("OTA: Update not finished");
+    firebaseSetOtaStatus("error", "Update not finished");
+    return false;
+  }
+
+  Serial.println("OTA: Update successful, rebooting...");
+  firebaseSetOtaStatus("success", "");
+
+  // Clear otaRequest so we don't try again after reboot
+  firebasePutJson("/devices/" + String(DEVICE_ID) + "/otaRequest", "null");
+
+  delay(1000);
+  ESP.restart();
+  return true; // never reached
+}
+
+// Check /devices/{DEVICE_ID}/otaRequest for a URL
+bool firebaseCheckAndHandleOtaRequest() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  String path = "/devices/" + String(DEVICE_ID) + "/otaRequest";
+  String payload = firebaseGetJson(path);
+  if (payload.length() == 0 || payload == "null") {
+    return false;
+  }
+
+  Serial.print("otaRequest payload: ");
+  Serial.println(payload);
+
+  // --- Require trigger === true ---
+  bool trigger = false;
+  int trigKey = payload.indexOf("\"trigger\"");
+  if (trigKey >= 0) {
+    int colonT = payload.indexOf(':', trigKey);
+    if (colonT >= 0) {
+      String rest = payload.substring(colonT + 1);
+      rest.trim();
+      if (rest.startsWith("true") || rest.startsWith(" true")) {
+        trigger = true;
+      }
+    }
+  }
+
+  if (!trigger) {
+    // We have a URL staged but no trigger: do nothing.
+    return false;
+  }
+
+  // --- Parse URL field ---
+  int urlKey = payload.indexOf("\"url\"");
+  if (urlKey < 0) {
+    firebaseSetOtaStatus("error", "otaRequest missing url");
+    return false;
+  }
+
+  int colon = payload.indexOf(':', urlKey);
+  if (colon < 0) {
+    firebaseSetOtaStatus("error", "otaRequest url parse error");
+    return false;
+  }
+
+  int firstQuote = payload.indexOf('"', colon + 1);
+  if (firstQuote < 0) {
+    firebaseSetOtaStatus("error", "otaRequest url quote error");
+    return false;
+  }
+
+  int secondQuote = payload.indexOf('"', firstQuote + 1);
+  if (secondQuote < 0) {
+    firebaseSetOtaStatus("error", "otaRequest url quote error2");
+    return false;
+  }
+
+  String url = payload.substring(firstQuote + 1, secondQuote);
+  url.trim();
+
+  if (url.length() == 0) {
+    firebaseSetOtaStatus("error", "otaRequest url empty");
+    return false;
+  }
+
+  // Optional: ensure http(s)
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    firebaseSetOtaStatus("error", "otaRequest url must be http(s)");
+
+    // Clear trigger so we don't keep retrying bad URL
+    String clearJson = "{";
+    clearJson += "\"url\":\"" + url + "\",";
+    clearJson += "\"trigger\":false";
+    clearJson += "}";
+    firebasePutJson(path, clearJson);
+
+    return false;
+  }
+
+  Serial.print("Parsed OTA URL: ");
+  Serial.println(url);
+
+  // Clear trigger BEFORE running OTA so it only runs once per click
+  String clearJson = "{";
+  clearJson += "\"url\":\"" + url + "\",";
+  clearJson += "\"trigger\":false";
+  clearJson += "}";
+  firebasePutJson(path, clearJson);
+
+  // Perform OTA (on success, performOtaFromUrl will also set otaRequest to null)
+  bool ok = performOtaFromUrl(url);
+  return ok;
+}
+
+
+// ===================== FIREBASE: STATE HEARTBEAT =====================
+
+void firebaseSendStateHeartbeat() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  time_t nowSec = time(NULL);
+  uint64_t tsMs = (nowSec > 0) ? (uint64_t)nowSec * 1000ULL : (uint64_t)millis();
+
+  String path = "/devices/" + String(DEVICE_ID) + "/state";
+
+  String json = "{";
+  json += "\"online\":true,";
+  json += "\"fwVersion\":\"" + String(FW_VERSION) + "\",";
+  json += "\"lastSeen\":" + String((unsigned long long)tsMs);
+  json += "}";
+
+  firebasePutJson(path, json);
+}
+
+
+// ===================== HTTP HANDLERS (local debug/legacy) =====================
 
 void handleRoot(){
   server.send_P(200, "text/html", MAIN_PAGE_HTML);
@@ -744,13 +1166,20 @@ void setup(){
   lastSafetyBackoffTs = nowSeconds();
 
   // Connect to home Wi-Fi
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  //WiFi.mode(WIFI_STA);
+  //WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  //wm.resetSettings();
   Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
+      if(!wm.autoConnect("ESP32_Config")) {
+        Serial.println("Failed to connect, waiting for user config...");
+    } else {
+        Serial.println("Connected to WiFi!");
+    }
+  /*while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
-  }
+  }*/
   Serial.println();
   Serial.print("Connected, IP address: ");
   Serial.println(WiFi.localIP());
@@ -774,11 +1203,14 @@ void setup(){
   server.begin();
   Serial.println("HTTP server started");
 
-  // IFTTT: report we are online
-  sendIFTTT("reef_doser_online",
-            "Reef doser booted",
-            WiFi.localIP().toString(),
-            getLocalTimeString());
+  // Firebase: report we are online (Cloud Function can send SMS/email)
+  firebasePushAlert("online",
+                    "Reef doser booted",
+                    WiFi.localIP().toString(),
+                    getLocalTimeString());
+
+  // Initial Firebase state heartbeat
+  firebaseSendStateHeartbeat();
 }
 
 void loop(){
@@ -789,11 +1221,21 @@ void loop(){
   // Dose at 3 scheduled time slots per day
   maybeDosePumpsRealTime();
 
-  // Periodically poll Firebase for resetAi command (every ~60s)
-  static unsigned long lastResetPollMs = 0;
   unsigned long nowMs = millis();
-  if (nowMs - lastResetPollMs >= 60000UL) {
-    lastResetPollMs = nowMs;
+
+  // Periodically poll Firebase commands (resetAi, liveDose, otaRequest)
+  static unsigned long lastFirebasePollMs = 0;
+  if (nowMs - lastFirebasePollMs >= 10000UL) { // every ~10s
+    lastFirebasePollMs = nowMs;
     firebaseCheckAndHandleResetAi();
+    firebaseCheckAndHandleLiveDose();
+    firebaseCheckAndHandleOtaRequest();
+  }
+
+  // Send state heartbeat every 30s
+  static unsigned long lastStateHeartbeatMs = 0;
+  if (nowMs - lastStateHeartbeatMs >= 30000UL) {
+    lastStateHeartbeatMs = nowMs;
+    firebaseSendStateHeartbeat();
   }
 }
