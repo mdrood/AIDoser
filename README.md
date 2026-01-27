@@ -1,1 +1,296 @@
-# AIDoser
+Steps for OTA:
+ build the scetch and find in under C:\Users\mdroo\OneDrive\Documents\platformio\AIDoser\.pio\build\esp32doit-devkit-v1/firmware.bin
+
+ Move that firmware.bin file to C:\Users\mdroo\OneDrive\Firebase\aidoser\public\devices\reefDoser5 or 1 or 2...
+
+ open dos prompt navigate to C:\Users\mdroo\OneDrive\Firebase\aidoser\public> 
+ and type firebase deploy
+ then on GUI select file in .....devices/reefDoserx(1,2,3...) 
+ push the button Update firmware &  request OTA
+
+
+
+
+
+IMPORTANT NOTES for AIDosder
+
+When to use reset AI
+
+Good times to flip resetAi to true:
+
+After you change tank volume (add/remove big equipment, frag tank, sump)
+
+After a big chemistry correction done manually (huge water change, big buffer dump)
+
+If dosing has been weird because of bad test data and you want to restart the learning
+
+file has to go under otaRequest payload: https://aidoser.web.app/devices/reefDoser5/firmware.bin
+
+
+5.6 / day
+
+run 15 ml
+
+run 12 hours run 48 min/hour little pump
+
+eric buckets:
+Kalc  needs to be air tight
+calcium carbonate   Carolina chemicals
+alk(lye)[sodium hydroxide]  strong amazon i have these. 
+
+trace elements:   
+
+everyone doses alk and calcium mg?
+
+sellable powder.
+masses			once brs turn bs
+ brs alk -> -->  sodium hydroxide don't need to be air tight
+brs calcium -->  calcium carbinate from Carolina  don't need to be air tight# AIDoser
+
+Things to do:
+
+
+
+build calibration page.
+
+do multiplication for dosing parameters for starting.
+
+//////////////Kalk dkh/ml ///////////////////////
+
+📦 300 gallons tank
+
+First convert gallons to liters:
+
+300 gal × 3.785 L/gal = 1,135.5 L
+
+Now compare to baseline:
+
+1,135.5 L ÷ 100 L = 11.355× more volume
+
+So the same 1 mL dose will give:
+
+0.0014
+11.355
+=
+0.000123
+ dKH per mL
+11.355
+0.0014
+	​
+
+=0.000123 dKH per mL
+Final number for 300 gal system:
+
+
+//////////////// calium in Kalk  ppm/ml
+
+📦 Tank water volume
+
+Your tank: 300 gallons
+
+Convert:
+
+300
+×
+3.785
+=
+1135.5
+ L
+300×3.785=1135.5 L
+📍 Now compute ppm rise per 1 mL dose
+
+We add 0.8 mg Ca into 1135.5 L:
+
+ppm
+=
+0.8
+1135.5
+=
+0.000704
+ ppm
+ppm=
+1135.5
+0.8
+	​
+
+=0.000704 ppm
+✔ Final Answer:
+
+1 mL saturated kalk → ~0.00070 ppm Ca in a 300-gallon system
+
+////////////// dkh/ml in sodium hydroxide  ///////////////////////////
+Perfect — this one is clean because sodium hydroxide (NaOH) is a pure alkalinity reagent (no calcium). So we can compute its dKH per mL for your 300-gallon (≈1135.6 L) system once we know the solution strength.
+
+But I need one clarification from you:
+
+What concentration sodium hydroxide are you using?
+
+There are common hobby concentrations:
+
+1 N NaOH (same strength as BRS / many 2-part systems)
+
+2 N NaOH
+
+½ N
+
+Homemade by weight (e.g., 40 g in 1 L) — yields ~1 N
+
+Full-saturated (≈19 wt%) — dangerous and not typical for dosing
+
+If you're using the standard reef dosing version (1 N)
+
+I’ll compute assuming 1 N NaOH, since that’s what commercial reef “ALK Part” usually is.
+
+🧮 Alkalinity of 1 N NaOH
+
+1 N NaOH = 1 mol/L = 1 equivalent/L of alkalinity
+
+1 equivalent = 50,000 dKH/L
+
+So per mL:
+
+50
+,
+000
+÷
+1000
+=
+50
+ dKH per mL (in pure water)
+50,000÷1000=50 dKH per mL (in pure water)
+
+This is the "reagent strength."
+Then we dilute into your tank volume:
+
+🧮 DKH per mL in a 300-gallon system
+
+Tank volume = 1135.6 L
+
+Add 1 mL dosing solution → adds 50 dKH worth of alkalinity into:
+
+Tank dKH increase
+=
+50
+1135.6
+=
+0.044
+ dKH
+Tank dKH increase=
+1135.6
+50
+	​
+
+=0.044 dKH
+✅ Final result for 1 mL of 1N NaOH into 300 gal reef
+
+1 mL of 1 N sodium hydroxide → +0.044 dKH in a 300-gallon tank
+
+////////////////////// alk in calcium carbonate /////////////////////
+
+🧪 Chemistry Basis
+
+CaCO₃ provides:
+
+1 mole Ca²⁺
+
+2 equivalents alkalinity (i.e., 2 moles HCO₃⁻)
+
+Molecular weights:
+
+CaCO₃ = 100 g/mol
+
+1 mole CaCO₃ → 2 eq alkalinity
+
+So alkalinity per gram:
+
+2
+ eq
+100
+ g
+=
+0.02
+ eq/g
+100 g
+2 eq
+	​
+
+=0.02 eq/g
+
+Convert eq → dKH:
+
+0.02
+ eq/g
+×
+50,000
+ dKH/eq
+=
+1000
+ dKH/g
+0.02 eq/g×50,000 dKH/eq=1000 dKH/g
+
+So the reagent strength is:
+
+1 g CaCO₃ = 1000 dKH (pure)
+
+And:
+
+1 mg CaCO₃ = 1 dKH
+
+This is a very clean conversion.
+
+🧮 Now convert for your tank volume = 300 gal
+
+300 gal = 1135.6 L
+
+If you add 1 mg CaCO₃ to 1135.6 L:
+
+Tank increase
+=
+1
+ dKH
+1135.6
+=
+0.000881
+ dKH
+Tank increase=
+1135.6
+1 dKH
+	​
+
+=0.000881 dKH
+📌 Final result
+
+1 mg of CaCO₃ → ~0.00088 dKH in a 300-gallon system
+
+Kalk = cheap Ca + Alk + higher pH  
+
+NaOH = cheap, powerful Alk + pH  sodium hydroxide
+
+CaCl₂ = cheap Ca counterpart to your NaOH  calcium chloride
+
+Mg mix = cheap Mg correction every so often
+
+how to mix
+
+Calcium Chloride Dihydrate (CaCl₂·2H₂O)
+(Most hobby stuff is dihydrate; BRS, Dowflake, Pool Hardness Increaser)
+
+RO/DI water
+
+Mixing Ratio
+
+500 grams CaCl₂·2H₂O + RO/DI water to make 1 gallon (3.785 L)  i woould need 500grams which is a pound per gallon of water.  i get 7 lbs at amazon for $30
+
+
+So this is my main 3 AMEN
+
+
+So your idea (kalk + NaOH + CaCl₂) is actually smart:
+
+handles salinity better than straight 2-part
+
+cheaper than AFR
+
+predictable
+
+good for SPS uptake rates

@@ -8,6 +8,7 @@
 #include <HTTPClient.h>
 #include <Update.h>
 #include <stdint.h>
+#include <Preferences.h>
 
 // If MAIN_PAGE_HTML is defined in another file, this keeps it linking cleanly:
 // Simple placeholder page – ESP32 is now mainly a backend.
@@ -44,10 +45,13 @@ const int   DST_OFFSET_SEC = 3600;       // DST +1h (simple)
 // ===================== FIREBASE (REST API) =====================
 
 const char* FIREBASE_DB_URL = "https://aidoser-default-rtdb.firebaseio.com";
-const char* DEVICE_ID       = "reefDoser1";   // 👈 must match your DB path
+const char* DEVICE_ID       = "reefDoser5";   // 👈 must match your DB path
 const char* FW_VERSION      = "1.0.0-esp32";  // 👈 bump when you flash new firmware
 
 WiFiClientSecure secureClient;
+
+Preferences dosingPrefs;
+
 
 // Build full Firebase URL from a path (e.g. "/devices/reefDoser1/commands/resetAi")
 String firebaseUrl(const String& path) {
@@ -197,11 +201,11 @@ float FLOW_MG_ML_PER_MIN   = 50.0f;
 // ===================== CHEMISTRY CONSTANTS =====================
 
 // ---------- KALKWASSER (saturated) ----------
-float DKH_PER_ML_KALK_TANK    = 0.00010f;   // +0.00010 dKH/ml in 300g
-float CA_PPM_PER_ML_KALK_TANK = 0.00070f;   // +0.00070 ppm Ca/ml
+float DKH_PER_ML_KALK_TANK    = 0.00010f;   // +0.00010 dKH/ml in 300 gallons.00012
+float CA_PPM_PER_ML_KALK_TANK = 0.00070f;   // +0.00070 ppm Ca/ml .000704
 
 // ---------- TROPIC MARIN ALL-FOR-REEF ----------
-float DKH_PER_ML_AFR_TANK     = 0.0052f;    // +0.0052 dKH/ml in 300g
+float DKH_PER_ML_AFR_TANK     = 0.0052f;    // +0.0052 dKH/ml in 300 gallons
 float CA_PPM_PER_ML_AFR_TANK  = 0.037f;     // +0.037 ppm Ca/ml
 float MG_PPM_PER_ML_AFR_TANK  = 0.006f;     // +0.006 ppm Mg/ml
 
@@ -239,6 +243,48 @@ float MAX_MG_ML_PER_DAY   = 40.0f;    // 40 ml/day max Mg
 
 // SAFETY: throttle dosing if no tests for a while
 uint32_t lastSafetyBackoffTs = 0;
+
+// Persist AI dosing plan (ml/day) across reboots/OTA
+void loadDosingFromPrefs() {
+  if (!dosingPrefs.begin("dosing", true)) {
+    Serial.println("Prefs: failed to open dosing (read)");
+    return;
+  }
+
+  dosing.ml_per_day_kalk = dosingPrefs.getFloat("kalk", dosing.ml_per_day_kalk);
+  dosing.ml_per_day_afr  = dosingPrefs.getFloat("afr",  dosing.ml_per_day_afr);
+  dosing.ml_per_day_mg   = dosingPrefs.getFloat("mg",   dosing.ml_per_day_mg);
+
+  dosingPrefs.end();
+
+  Serial.print("Prefs: loaded dosing KALK=");
+  Serial.print(dosing.ml_per_day_kalk);
+  Serial.print(" AFR=");
+  Serial.print(dosing.ml_per_day_afr);
+  Serial.print(" MG=");
+  Serial.println(dosing.ml_per_day_mg);
+}
+
+void saveDosingToPrefs() {
+  if (!dosingPrefs.begin("dosing", false)) {
+    Serial.println("Prefs: failed to open dosing (write)");
+    return;
+  }
+
+  dosingPrefs.putFloat("kalk", dosing.ml_per_day_kalk);
+  dosingPrefs.putFloat("afr",  dosing.ml_per_day_afr);
+  dosingPrefs.putFloat("mg",   dosing.ml_per_day_mg);
+
+  dosingPrefs.end();
+
+  Serial.print("Prefs: saved dosing KALK=");
+  Serial.print(dosing.ml_per_day_kalk);
+  Serial.print(" AFR=");
+  Serial.print(dosing.ml_per_day_afr);
+  Serial.print(" MG=");
+  Serial.println(dosing.ml_per_day_mg);
+}
+
 
 
 // ===================== TEST HISTORY FOR GRAPHS =====================
@@ -527,6 +573,9 @@ void resetAIState() {
   // Recompute per-dose seconds
   updatePumpSchedules();
 
+  // Save default dosing so it becomes the new baseline
+  saveDosingToPrefs();
+
   // Optional: Firebase alert for AI reset
   firebasePushAlert("reset",
                     "AI dosing engine reset",
@@ -635,6 +684,9 @@ void onNewTestInput(float ca, float alk, float mg, float ph){
   enforceChemSafetyCaps();
   updatePumpSchedules();
 
+  // Persist updated dosing plan so it survives reboot/OTA
+  saveDosingToPrefs();
+
   lastSafetyBackoffTs = nowSeconds();
 }
 
@@ -661,6 +713,9 @@ void safetyBackoffIfNoTests() {
 
   enforceChemSafetyCaps();
   updatePumpSchedules();
+
+  // Persist backed-off dosing plan
+  saveDosingToPrefs();
 
   lastSafetyBackoffTs = now;
 
@@ -1162,6 +1217,8 @@ void setup(){
   digitalWrite(PIN_PUMP_AFR,  LOW);
   digitalWrite(PIN_PUMP_MG,   LOW);
 
+  // Load last saved AI dosing plan from NVS (if any)
+  loadDosingFromPrefs();
   updatePumpSchedules();
   lastSafetyBackoffTs = nowSeconds();
 

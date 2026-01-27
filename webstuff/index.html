@@ -1385,56 +1385,59 @@
     });
   }
 
-  // ----- OTA upload + request -----
+    // ----- OTA OTA trigger via Hosting path (no Firebase Storage upload) -----
+  // This assumes you have already deployed a firmware file to Firebase Hosting at:
+  //   /devices/<deviceId>/firmware.bin
+  // For example: public/devices/reefDoser5/firmware.bin, then `firebase deploy --only hosting`
+  // When you click the button below, we simply write an otaRequest with:
+  //   { url, fileName, requestedAt, trigger: true }
+  // The ESP32 sees trigger===true and runs OTA from that URL.
   if (otaUploadBtn) {
     otaUploadBtn.addEventListener('click', function() {
       if (!activeDeviceId) {
-        alert('No device selected. Log in to a tank owner account first.');
-        return;
-      }
-      if (!otaFileInput || !otaFileInput.files || !otaFileInput.files[0]) {
-        alert('Please choose a .bin firmware file first.');
+        alert('No active device selected.');
         return;
       }
 
-      var file = otaFileInput.files[0];
-      otaStatusEl.textContent = 'Uploading firmware…';
+      var otaStatusEl   = document.getElementById('otaStatusText');
+      var otaFileInput  = document.getElementById('otaFileInput');
+      var fileName = 'firmware.bin';
 
-      var path = 'firmware/' + activeDeviceId + '/' + Date.now() + '_' + file.name;
-      var storageRef = storage.ref().child(path);
-      var uploadTask = storageRef.put(file);
+      // If user picked a file, we'll reuse that name as a convenience so your
+      // local file name matches the file you deploy to Hosting.
+      if (otaFileInput && otaFileInput.files && otaFileInput.files[0]) {
+        fileName = otaFileInput.files[0].name;
+      }
 
-      uploadTask.on('state_changed',
-        function(snapshot) {
-          var pct = 0;
-          if (snapshot.totalBytes > 0) {
-            pct = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          }
-          otaStatusEl.textContent = 'Uploading firmware… ' + pct.toFixed(0) + '%';
-        },
-        function(error) {
-          console.error('OTA upload error:', error);
-          otaStatusEl.textContent = 'OTA upload error: ' + (error.message || error);
-        },
-        function() {
-          uploadTask.snapshot.ref.getDownloadURL().then(function(url) {
-            var reqPath = 'devices/' + activeDeviceId + '/otaRequest';
-            var reqData = {
-              url: url,
-              fileName: file.name,
-              storagePath: path,
-              requestedAt: firebase.database.ServerValue.TIMESTAMP
-            };
-            db.ref(reqPath).set(reqData).then(function() {
-              otaStatusEl.textContent = 'OTA requested. ESP32 will update when it processes otaRequest.';
-            }).catch(function(err) {
-              otaStatusEl.textContent = 'Error writing OTA request: ' + (err.message || err);
-            });
-          });
+      // Construct expected hosting URL, e.g. https://aidoser.web.app/devices/reefDoser5/firmware.bin
+      var origin = window.location.origin;
+      var url = origin + '/devices/' + activeDeviceId + '/' + fileName;
+
+      if (otaStatusEl) {
+        otaStatusEl.textContent = 'Requesting OTA from ' + url + ' …';
+      }
+
+      var reqPath = 'devices/' + activeDeviceId + '/otaRequest';
+      var reqData = {
+        url: url,
+        fileName: fileName,
+        requestedAt: firebase.database.ServerValue.TIMESTAMP,
+        trigger: true
+      };
+
+      db.ref(reqPath).set(reqData).then(function() {
+        if (otaStatusEl) {
+          otaStatusEl.textContent = 'OTA requested. ESP32 will update when it processes otaRequest.';
         }
-      );
+      }).catch(function(err) {
+        console.error('Error writing OTA request:', err);
+        if (otaStatusEl) {
+          otaStatusEl.textContent = 'Error writing OTA request: ' + (err.message || err);
+        }
+      });
     });
   }
+
 
   // ----- Auth state listener -----
   auth.onAuthStateChanged(function(user) {
