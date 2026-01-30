@@ -6,1516 +6,383 @@
 <title>Reef AI Doser</title>
 <style>
   :root {
-    --bg: #020817;
+    --bg: #020817; 
     --bg-card: rgba(15, 23, 42, 0.96);
-    --accent: #22d3ee;
+    --accent: #22d3ee; 
     --accent-soft: rgba(56, 189, 248, 0.18);
-    --accent-strong: #38bdf8;
-    --text: #e2e8f0;
+    --accent-strong: #38bdf8; 
+    --text: #e2e8f0; 
     --text-soft: #94a3b8;
-    --border: rgba(148, 163, 184, 0.35);
-    --danger: #f97373;
+    --border: rgba(148, 163, 184, 0.35); 
+    --danger: #f97373; 
     --success: #4ade80;
   }
-
-  * {
-    box-sizing: border-box;
-  }
-
+  * { box-sizing: border-box; }
   body {
-    margin: 0;
-    min-height: 100vh;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", Arial, sans-serif;
+    margin: 0; min-height: 100vh; font-family: system-ui, -apple-system, sans-serif;
     background: radial-gradient(circle at top, #0ea5e9 0, #020617 40%, #020617 100%);
-    color: var(--text);
-    display: flex;
-    justify-content: center;
-    padding: 16px;
+    color: var(--text); display: flex; justify-content: center; padding: 16px;
   }
-
-  .shell {
-    width: 100%;
-    max-width: 900px;
-  }
-
-  .glass-panel {
-    background: linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.96));
-    border-radius: 18px;
-    border: 1px solid rgba(148, 163, 184, 0.3);
-    box-shadow:
-      0 24px 60px rgba(15, 23, 42, 0.9),
-      0 0 0 1px rgba(15, 23, 42, 0.7);
-    padding: 18px 16px 22px;
-    backdrop-filter: blur(18px);
-  }
-
-  @media (min-width: 640px) {
-    .glass-panel {
-      padding: 22px 24px 26px;
-    }
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-bottom: 18px;
-    flex-wrap: wrap;
-  }
-
+  .shell { width: 100%; max-width: 1100px; }
+  .glass-panel { background: var(--bg-card); border-radius: 18px; border: 1px solid var(--border); padding: 25px; backdrop-filter: blur(20px); box-shadow: 0 24px 60px rgba(15, 23, 42, 0.9); }
+  
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 30px; }
+  .header-left { display: flex; align-items: center; gap: 15px; }
+  
   .reef-icon {
-    width: 42px;
-    height: 42px;
-    border-radius: 999px;
+    width: 48px; height: 48px; border-radius: 50%;
     background: radial-gradient(circle at 30% 20%, #e0f2fe, #0ea5e9 40%, #0369a1 70%, #020617 100%);
-    box-shadow:
-      0 0 0 2px rgba(8, 47, 73, 0.8),
-      0 12px 26px rgba(12, 74, 110, 0.7);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .reef-icon-wave {
-    width: 70%;
-    height: 70%;
-    border-radius: 50%;
-    border: 2px solid rgba(226, 232, 240, 0.9);
-    border-top-color: transparent;
-    border-left-color: transparent;
-    transform: rotate(25deg);
-  }
-
-  header h1 {
-    font-size: 1.4rem;
-    letter-spacing: 0.03em;
-    margin: 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  header h1 span.highlight {
-    color: var(--accent);
-  }
-
-  header p {
-    margin: 0;
-    font-size: 0.8rem;
-    color: var(--text-soft);
-  }
-
-  .pill-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 6px;
-  }
-
-  .pill {
-    font-size: 0.7rem;
-    padding: 4px 8px;
-    border-radius: 999px;
-    border: 1px solid rgba(148, 163, 184, 0.35);
-    color: var(--text-soft);
-    background: rgba(15, 23, 42, 0.9);
-  }
-
-  .pill.accent {
-    border-color: rgba(34, 211, 238, 0.8);
-    background: radial-gradient(circle at 20% 0%, rgba(56, 189, 248, 0.25), rgba(15, 23, 42, 0.85));
-    color: var(--accent);
-  }
-
-  .pill.button-like {
-    cursor: pointer;
-    border-style: dashed;
-  }
-
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 14px;
-  }
-
-  @media (min-width: 768px) {
-    .grid {
-      grid-template-columns: minmax(0,1.1fr) minmax(0,1fr);
-    }
-  }
-
-  .card {
-    border-radius: 14px;
-    border: 1px solid var(--border);
-    background: linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.98));
-    padding: 14px 14px 16px;
-    position: relative;
-    overflow: hidden;
-  }
-
-  .card::before {
-    content: "";
-    position: absolute;
-    inset: -40%;
-    background:
-      radial-gradient(circle at 0% 0%, var(--accent-soft), transparent 55%),
-      radial-gradient(circle at 100% 100%, rgba(59,130,246,0.12), transparent 55%);
-    opacity: 0.55;
-    pointer-events: none;
-  }
-
-  .card-inner {
-    position: relative;
-    z-index: 1;
-  }
-
-  .card h2 {
-    font-size: 0.95rem;
-    margin: 0 0 8px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--text-soft);
-  }
-
-  .card h3 {
-    font-size: 0.9rem;
-    margin: 0 0 10px;
-    color: var(--accent-strong);
-  }
-
-  .field {
-    margin-bottom: 8px;
-  }
-
-  .field label {
-    display: block;
-    font-size: 0.75rem;
-    color: var(--text-soft);
-    margin-bottom: 3px;
-  }
-
-  .field input {
-    width: 100%;
-    border-radius: 8px;
-    border: 1px solid rgba(148, 163, 184, 0.55);
-    background: rgba(15, 23, 42, 0.9);
-    color: var(--text);
-    font-size: 0.85rem;
-    padding: 7px 9px;
-    outline: none;
-  }
-
-  .field input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.4);
-  }
-
-  button[type="submit"] {
-    margin-top: 6px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 8px 14px;
-    font-size: 0.85rem;
-    border-radius: 999px;
-    border: none;
-    background: radial-gradient(circle at 10% 0%, #22d3ee, #1d4ed8);
-    color: #eff6ff;
-    cursor: pointer;
-    box-shadow:
-      0 10px 22px rgba(37, 99, 235, 0.6),
-      0 0 0 1px rgba(30, 64, 175, 0.5);
-  }
-
-  button[type="submit"]:active {
-    transform: translateY(1px);
-    box-shadow:
-      0 6px 18px rgba(37, 99, 235, 0.6),
-      0 0 0 1px rgba(30, 64, 175, 0.6);
-  }
-
-  .tags-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 6px;
-  }
-
-  .tag {
-    font-size: 0.75rem;
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: rgba(15, 23, 42, 0.95);
-    border: 1px solid rgba(148, 163, 184, 0.5);
-    color: var(--text-soft);
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .tag-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 999px;
-    background: var(--accent);
-  }
-
-  .tag.kalk .tag-dot {
-    background: #f97316;
-  }
-
-  .tag.afr .tag-dot {
-    background: #a855f7;
-  }
-
-  .tag.mg .tag-dot {
-    background: #22c55e;
-  }
-
-  .tag small {
-    font-size: 0.7rem;
-    color: var(--text-soft);
-  }
-
-  .hint {
-    font-size: 0.7rem;
-    color: var(--text-soft);
-    margin-top: 6px;
-  }
-
-  .hint span {
-    color: var(--accent);
-  }
-
-  .chart-card {
-    margin-top: 14px;
-  }
-
-  .chart-container {
-    width: 100%;
-    max-height: 260px;
-  }
-
-  footer {
-    margin-top: 10px;
-    font-size: 0.7rem;
-    color: var(--text-soft);
-    text-align: right;
-  }
-
-  footer span {
-    color: var(--accent-soft);
-  }
-
-  /* ===== Login modal styles ===== */
-  #loginModal {
-    position: fixed;
-    inset: 0;
-    background: rgba(15, 23, 42, 0.85);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 9999;
-  }
-
-  #loginModal.hidden {
-    display: none;
-  }
-
-  .login-panel {
-    background: rgba(15, 23, 42, 0.98);
-    border-radius: 14px;
-    border: 1px solid rgba(148, 163, 184, 0.7);
-    padding: 18px 18px 16px;
-    max-width: 320px;
-    width: 100%;
-    box-shadow:
-      0 24px 50px rgba(15, 23, 42, 0.95),
-      0 0 0 1px rgba(15, 23, 42, 0.8);
-    text-align: center;
-  }
-
-  .login-panel h2 {
-    margin: 0 0 4px;
-    font-size: 1.1rem;
-  }
-
-  .login-panel p {
-    margin: 0 0 10px;
-    font-size: 0.8rem;
-    color: var(--text-soft);
-  }
-
-  .login-panel input {
-    width: 100%;
-    border-radius: 8px;
-    border: 1px solid rgba(148, 163, 184, 0.55);
-    background: rgba(15, 23, 42, 0.9);
-    color: var(--text);
-    font-size: 0.85rem;
-    padding: 7px 9px;
-    outline: none;
-    margin-top: 6px;
-  }
-
-  .login-panel input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.4);
-  }
-
-  #loginButton {
-    margin-top: 10px;
-    width: 100%;
-    padding: 8px 14px;
-    font-size: 0.85rem;
-    border-radius: 999px;
-    border: none;
-    background: radial-gradient(circle at 10% 0%, #22d3ee, #1d4ed8);
-    color: #eff6ff;
-    cursor: pointer;
-    box-shadow:
-      0 10px 22px rgba(37, 99, 235, 0.6),
-      0 0 0 1px rgba(30, 64, 175, 0.5);
-  }
-
-  #loginButton:active {
-    transform: translateY(1px);
-    box-shadow:
-      0 6px 18px rgba(37, 99, 235, 0.6),
-      0 0 0 1px rgba(30, 64, 175, 0.6);
-  }
-
-  #loginError {
-    margin-top: 6px;
-    font-size: 0.75rem;
-    min-height: 1em;
-    color: var(--danger);
-    text-align: left;
-  }
-
-  .auth-bar {
-    margin: -10px 0 4px;
-    font-size: 0.75rem;
-    color: var(--text-soft);
-    text-align: right;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  #authStatusText {
-    opacity: 0.85;
-  }
-
-  #logoutBtn {
-    padding: 4px 10px;
-    font-size: 0.75rem;
-    border-radius: 999px;
-    border: 1px solid rgba(148, 163, 184, 0.6);
-    background: transparent;
-    color: var(--text-soft);
-    cursor: pointer;
-  }
-
-  #logoutBtn:hover {
-    background: rgba(15, 23, 42, 0.9);
-  }
-
-  /* DB & device status line */
-  #dbStatus,
-  #deviceStatus {
-    font-size: 0.7rem;
-    color: var(--text-soft);
-    text-align: right;
-  }
-
-  #dbStatus {
-    margin-bottom: 2px;
-  }
-
-  #deviceStatus {
-    margin-bottom: 8px;
-  }
-
-  /* Dosing log table */
-  .log-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 10px;
-    font-size: 0.75rem;
-  }
-
-  .log-table thead {
-    color: var(--text-soft);
-  }
-
-  .log-table th,
-  .log-table td {
-    padding: 4px 6px;
-    border-bottom: 1px solid rgba(148,163,184,0.25);
-    text-align: right;
-  }
-
-  .log-table th:first-child,
-  .log-table td:first-child {
-    text-align: left;
-  }
-
-  /* Tank volume modal */
-  #tankModal {
-    position: fixed;
-    inset: 0;
-    background: rgba(15, 23, 42, 0.9);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 9998;
-  }
-
-  #tankModal.hidden {
-    display: none;
-  }
-
-  .tank-panel {
-    background: rgba(15, 23, 42, 0.98);
-    border-radius: 14px;
-    border: 1px solid rgba(248, 113, 113, 0.7);
-    padding: 18px 18px 16px;
-    max-width: 360px;
-    width: 100%;
-    box-shadow:
-      0 24px 50px rgba(15, 23, 42, 0.95),
-      0 0 0 1px rgba(15, 23, 42, 0.8);
-  }
-
-  .tank-panel h2 {
-    margin: 0 0 6px;
-    font-size: 1.1rem;
-    color: var(--danger);
-  }
-
-  .tank-panel p {
-    margin: 4px 0;
-    font-size: 0.8rem;
-    color: var(--text-soft);
-  }
-
-  .tank-panel label {
-    font-size: 0.8rem;
-    color: var(--text-soft);
-  }
-
-  .tank-panel input[type="number"] {
-    width: 100%;
-    margin-top: 4px;
-    margin-bottom: 10px;
-    border-radius: 8px;
-    border: 1px solid rgba(248, 113, 113, 0.7);
-    background: rgba(15, 23, 42, 0.95);
-    color: var(--text);
-    padding: 7px 9px;
-    font-size: 0.9rem;
-  }
-
-  .tank-panel input[type="checkbox"] {
-    margin-right: 6px;
-  }
-
-  .tank-warning {
-    color: var(--danger);
-    font-size: 0.8rem;
-    margin: 8px 0 10px;
-    line-height: 1.4;
-  }
-
-  .tank-buttons {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 8px;
-  }
-
-  .tank-btn {
-    font-size: 0.8rem;
-    padding: 6px 12px;
-    border-radius: 999px;
-    border: 1px solid rgba(148, 163, 184, 0.8);
-    background: rgba(15, 23, 42, 0.9);
-    color: var(--text-soft);
-    cursor: pointer;
-  }
-
-  .tank-btn.save {
-    border-color: rgba(34, 197, 94, 0.9);
-    color: var(--success);
-  }
-
-  .tank-btn:hover {
-    background: rgba(15, 23, 42, 1);
-  }
-
-  #tankError {
-    margin-top: 4px;
-    font-size: 0.78rem;
-    min-height: 1em;
-    color: var(--danger);
-  }
-
-  /* Live control & OTA bits */
-  .live-status-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    font-size: 0.75rem;
-    color: var(--text-soft);
-    margin-bottom: 6px;
-  }
-
-  .live-status-pill {
-    padding: 4px 8px;
-    border-radius: 999px;
-    border: 1px solid rgba(148,163,184,0.4);
-    background: rgba(15,23,42,0.95);
-  }
-
-  .live-status-pill.online {
-    border-color: rgba(34,197,94,0.9);
-    color: var(--success);
-  }
-
-  .live-status-pill.offline {
-    border-color: rgba(248,113,113,0.9);
-    color: var(--danger);
-  }
-
-  #liveDoseBtn,
-  #otaUploadBtn {
-    margin-top: 6px;
-    padding: 7px 12px;
-    font-size: 0.8rem;
-    border-radius: 999px;
-    border: none;
-    background: radial-gradient(circle at 10% 0%, #22d3ee, #1d4ed8);
-    color: #eff6ff;
-    cursor: pointer;
-    box-shadow:
-      0 10px 22px rgba(37, 99, 235, 0.6),
-      0 0 0 1px rgba(30, 64, 175, 0.5);
-  }
-
-  #liveDoseBtn:active,
-  #otaUploadBtn:active {
-    transform: translateY(1px);
-    box-shadow:
-      0 6px 18px rgba(37, 99, 235, 0.6),
-      0 0 0 1px rgba(30, 64, 175, 0.6);
-  }
-
-  #otaFile {
-    margin-top: 4px;
-    font-size: 0.75rem;
-  }
-
-  #otaStatus {
-    font-size: 0.7rem;
-    color: var(--text-soft);
-    margin-top: 4px;
-    min-height: 1em;
-  }
+    box-shadow: 0 0 0 2px rgba(8, 47, 73, 0.8), 0 12px 26px rgba(12, 74, 110, 0.7);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .reef-icon-wave { width: 70%; height: 70%; border-radius: 50%; border: 2.5px solid rgba(255,255,255,0.9); border-top-color: transparent; border-left-color: transparent; transform: rotate(25deg); }
+  
+  .pill { font-size: 0.7rem; color: var(--accent); border: 1px solid var(--accent); padding: 3px 10px; border-radius: 999px; display: inline-block; margin-top: 5px; font-weight: 600; }
+  
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 25px; margin-bottom: 25px; }
+  .card { border-radius: 16px; border: 1px solid var(--border); background: rgba(15, 23, 42, 0.8); padding: 22px; position: relative; }
+  
+  label { font-size: 0.75rem; color: var(--text-soft); display: block; margin-top: 12px; font-weight: 500; }
+  input { width: 100%; padding: 12px; border-radius: 10px; background: #000; border: 1px solid #333; color: #fff; margin-top: 6px; font-size: 1rem; }
+  button { cursor: pointer; border-radius: 999px; border: none; padding: 12px 24px; font-weight: bold; transition: all 0.2s; }
+  
+  .btn-action { background: linear-gradient(135deg, var(--accent), #1d4ed8); color: #fff; width: 100%; margin-top: 20px; text-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+  .btn-action:disabled { opacity: 0.6; cursor: not-allowed; }
+  .btn-outline-soft { background: transparent; border: 1px solid var(--border); color: var(--text-soft); font-size: 0.8rem; }
+  
+  .log-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 15px; }
+  .log-table th { text-align: left; color: var(--text-soft); padding: 12px 8px; border-bottom: 2px solid var(--border); }
+  .log-table td { padding: 12px 8px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  
+  .tag { font-size: 0.75rem; padding: 8px 14px; border-radius: 999px; background: rgba(0,0,0,0.4); border: 1px solid #444; color: #fff; margin: 4px; display: inline-flex; align-items: center; gap: 8px; }
+  .tag-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  
+  .modal-overlay { position: fixed; inset: 0; background: rgba(2, 8, 23, 0.98); z-index: 10000; display: flex; align-items: center; justify-content: center; }
+  .hidden { display: none !important; }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
-  <!-- LOGIN MODAL (Firebase Auth) -->
-  <div id="loginModal">
-    <div class="login-panel">
-      <h2>Reef AI Login</h2>
-      <p>Sign in with your email and password to access the doser.</p>
+  <div id="loginModal" class="modal-overlay">
+    <div class="glass-panel" style="width:360px; text-align:center;">
+      <h2 style="color:var(--accent); margin-bottom:25px; font-size: 2rem;">Reef AI</h2>
       <input id="loginEmail" type="email" placeholder="Email">
-      <input id="loginPassword" type="password" placeholder="Password">
-      <button id="loginButton">Login</button>
-      <div id="loginError"></div>
-    </div>
-  </div>
-
-  <!-- TANK VOLUME MODAL -->
-  <div id="tankModal" class="hidden">
-    <div class="tank-panel">
-      <h2>Change tank volume</h2>
-      <p><strong>Warning:</strong> Tank volume is used in all dosing calculations.</p>
-      <p class="tank-warning">
-        Changing this value after the system has been running can make existing AI tuning and test history inaccurate.
-        If you’ve added or removed a large piece of equipment (big sump, frag tank, etc.), you should strongly
-        consider resetting the AI dosing history so it can re-learn.
-      </p>
-
-      <label for="tankVolumeInput">New tank volume (gallons)</label>
-      <input id="tankVolumeInput" type="number" min="1" step="1" placeholder="e.g. 180">
-
-      <label style="display:flex;align-items:flex-start;margin-top:6px;">
-        <input id="tankResetCheckbox" type="checkbox">
-        <span>Also reset AI dosing history (clear test log and mark a reset point).</span>
-      </label>
-
-      <div id="tankError"></div>
-
-      <div class="tank-buttons">
-        <button id="tankCancelBtn" type="button" class="tank-btn">Cancel</button>
-        <button id="tankSaveBtn" type="button" class="tank-btn save">Save</button>
-      </div>
+      <input id="loginPassword" type="password" placeholder="Password" style="margin-top: 15px;">
+      <button id="loginButton" class="btn-action">Sign In</button>
+      <div id="loginError" style="color:var(--danger); margin-top:15px; font-size:0.85rem;"></div>
     </div>
   </div>
 
   <div class="shell">
     <div class="glass-panel">
       <header>
-        <div class="reef-icon">
-          <div class="reef-icon-wave"></div>
-        </div>
-        <div>
-          <h1>
-            Reef<span class="highlight">AI</span> Doser
-          </h1>
-          <p>Adaptive dosing for your reef — tuned by your test results.</p>
-          <div class="pill-row">
-            <div class="pill accent" id="tankSizePill">300 gal system</div>
-            <div class="pill" id="targetsPill">Targets: Alk 9 · Ca 420 · Mg 1440 · pH 8.2</div>
-            <button id="editTankBtn" type="button" class="pill button-like">Edit volume</button>
+        <div class="header-left">
+          <div class="reef-icon"><div class="reef-icon-wave"></div></div>
+          <div>
+            <h1 style="margin:0; font-size: 2rem; letter-spacing: -1px;">Reef<span style="color:var(--accent)">AI</span></h1>
+            <div class="pill">300 Gallon System</div>
           </div>
+        </div>
+        <div style="display: flex; gap: 12px;">
+          <button id="openCalibrationBtn" class="btn-outline-soft" style="border-color: var(--accent); color: var(--accent);">Pump Calibration</button>
+          <button id="logoutBtn" class="btn-outline-soft" style="color:var(--danger); border-color: rgba(249,115,115,0.3);">Logout</button>
         </div>
       </header>
 
-      <!-- Auth status + logout under header -->
-      <div class="auth-bar">
-        <span id="authStatusText">Not signed in</span>
-        <button id="logoutBtn" type="button">Logout</button>
-      </div>
-
-      <!-- DB status & active device info -->
-      <div id="dbStatus">Connecting to database…</div>
-      <div id="deviceStatus">Device: none selected</div>
-
       <div class="grid">
-        <!-- Left side: test form -->
         <div class="card">
-          <div class="card-inner">
-            <h2>New Test</h2>
-            <h3>Update tank parameters</h3>
-            <form id="testForm">
-              <div class="field">
-                <label for="ca">Calcium (ppm)</label>
-                <input id="ca" type="number" step="0.1" name="ca" required placeholder="e.g. 420">
-              </div>
-              <div class="field">
-                <label for="alk">Alkalinity (dKH)</label>
-                <input id="alk" type="number" step="0.01" name="alk" required placeholder="e.g. 9.0">
-              </div>
-              <div class="field">
-                <label for="mg">Magnesium (ppm)</label>
-                <input id="mg" type="number" step="1" name="mg" required placeholder="e.g. 1440">
-              </div>
-              <div class="field">
-                <label for="ph">pH</label>
-                <input id="ph" type="number" step="0.01" name="ph" required placeholder="e.g. 8.20">
-              </div>
-              <button type="submit">Save Test &amp; Recalculate</button>
-              <p class="hint">
-                Tip: Test every <span>~3 days</span> for best tuning. Extreme values are ignored for safety.
-              </p>
-            </form>
-          </div>
-        </div>
-
-        <!-- Right side: dosing summary -->
-        <div class="card">
-          <div class="card-inner">
-            <h2>Current Dosing Plan</h2>
-            <h3>Auto-adjusted ml / day</h3>
-            <div id="dosing" class="tags-row">
-              <!-- Filled by JS -->
+          <h3 style="color:var(--accent); margin-top:0;">Manual Test Entry</h3>
+          <form id="testForm">
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+              <div><label>Alkalinity (dKH)</label><input id="alk" type="number" step="0.01" placeholder="eg. 8.5"></div>
+              <div><label>Calcium (ppm)</label><input id="ca" type="number" step="0.1" placeholder="eg. 420"></div>
+              <div><label>Magnesium (ppm)</label><input id="mg" type="number" step="1" placeholder="eg. 1350"></div>
+              <div><label>pH Level</label><input id="ph" type="number" step="0.01" placeholder="eg. 8.2"></div>
             </div>
-            <p class="hint">
-              Doses are spread across three daytime windows (9:30 · 12:30 · 15:30) with safety caps and
-              gradual adjustments to avoid shocking the reef.
-            </p>
+            <button type="submit" class="btn-action">Calculate & Sync</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h3 style="color:var(--accent); margin-top:0;">Active Dosing Plan</h3>
+          <div id="dosingContainer" style="display: flex; flex-direction: column; gap: 10px;">
           </div>
+          <p style="font-size: 0.75rem; color: var(--text-soft); margin-top: 25px; line-height: 1.5;">
+            Calculated volumes are automatically spread across 24 dosing windows based on your reef's consumption.
+          </p>
         </div>
       </div>
 
-      <!-- Live control + OTA card -->
-      <div class="card" style="margin-top: 14px;">
-        <div class="card-inner">
-          <h2>Live Control &amp; OTA</h2>
-          <h3>Real-time ESP32 status</h3>
-          <div class="live-status-row">
-            <div id="liveStatusPill" class="live-status-pill offline">ESP32: offline</div>
-            <div id="firmwareInfo" class="live-status-pill">FW: unknown</div>
-            <div id="lastSeen" class="live-status-pill">Last seen: never</div>
+      <div class="card" style="margin-bottom: 25px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+          <h3 style="color:var(--accent); margin:0;">Device & Firmware</h3>
+          <div style="display: flex; gap: 8px;">
+            <div id="liveStatusPill" class="tag" style="margin:0;"><div class="tag-dot" style="background:gray;"></div>Offline</div>
+            <div id="firmwareInfo" class="tag" style="margin:0;">FW: --</div>
           </div>
-          <p class="hint">
-            Your ESP32 should periodically write <code>state.online</code>, <code>state.fwVersion</code>, and
-            <code>state.lastSeen</code> into the database for this to update in real time.
-          </p>
-
-          <h3 style="margin-top: 10px;">Live dose command</h3>
-          <p class="hint">
-            This sends a <strong>live dose</strong> command into the database. Your ESP32 firmware should watch
-            <code>devices/&lt;deviceId&gt;/commands/liveDose</code>, run a safe dose based on the current plan,
-            then clear or acknowledge the command.
-          </p>
-          <button id="liveDoseBtn" type="button">Run dose now (use current plan)</button>
-
-          <h3 style="margin-top: 14px;">OTA firmware update</h3>
-          <p class="hint">
-            Upload a compiled <code>.bin</code> firmware file. It will be stored in Firebase Storage and an OTA request
-            will be written to <code>devices/&lt;deviceId&gt;/otaRequest</code> for your ESP32 to process.
-          </p>
-          <input id="otaFile" type="file" accept=".bin,.bin.gz">
-          <br>
-          <button id="otaUploadBtn" type="button">Upload firmware &amp; request OTA</button>
-          <div id="otaStatus"></div>
         </div>
+        <div style="background: rgba(0,0,0,0.3); padding: 20px; border-radius: 12px; display: flex; gap: 15px; align-items: center;">
+          <input type="file" id="otaFile" accept=".bin" style="margin:0; border:none; background:transparent; font-size:0.8rem; flex:1;">
+          <button id="otaUploadBtn" class="btn-outline-soft" style="border-color: var(--accent); color: var(--accent);">Flash ESP32</button>
+        </div>
+        <div id="otaStatus" style="font-size:0.75rem; margin-top:10px; text-align:center; color: var(--accent); font-weight: 500;"></div>
       </div>
 
-      <!-- Chart + Dosing log -->
-      <div class="card chart-card">
-        <div class="card-inner">
-          <h2>Trend History</h2>
-          <h3>How your reef has been trending</h3>
-
-          <div class="chart-container">
-            <canvas id="paramsChart"></canvas>
-          </div>
-          <p class="hint">
-            Use this to spot trends in Alk, Ca, Mg, and pH over time. Each point is one manual test.
-          </p>
-
-          <h3 style="margin-top: 12px;">Dosing log</h3>
-          <table class="log-table">
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>Ca</th>
-                <th>Alk</th>
-                <th>Mg</th>
-                <th>pH</th>
-              </tr>
-            </thead>
-            <tbody id="dosingLogBody">
-              <!-- Filled by JS -->
-            </tbody>
-          </table>
-        </div>
+      <div class="card" style="margin-bottom: 25px;">
+        <h3 style="color:var(--accent); margin-top:0;">Parameter Trends</h3>
+        <div style="height:300px;"><canvas id="paramsChart"></canvas></div>
       </div>
 
-      <footer>
-        <span>ESP32 · Reef AI Doser</span>
-      </footer>
+      <div class="card">
+        <h3 style="color:var(--accent); margin-top:0;">Historical Logs</h3>
+        <table class="log-table">
+          <thead><tr><th>Date</th><th>Alk</th><th>Ca</th><th>Mg</th><th>pH</th></tr></thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
-<!-- Firebase v8 SDKs -->
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-storage.js"></script>
+  <div id="calibrationOverlay" class="hidden modal-overlay">
+    <div class="glass-panel" style="width:90%; max-width:900px; max-height:90vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; margin-bottom:25px; align-items: center;">
+        <h2 style="margin:0;">Pump Calibration</h2>
+        <div id="calibrationAck" style="font-size:12px;color:var(--text-soft);margin-top:6px;"></div>
+        <button id="closeCalibrationBtn" class="btn-outline-soft" style="background:var(--danger); color:white; border:none; padding: 10px 20px;">Close</button>
+      </div>
+      <div class="grid" id="calGrid">
+      </div>
+    </div>
+  </div>
 
-<script>
-  // === Firebase config for AIDOSER project (v8 style) ===
-  var firebaseConfig = {
-    apiKey: "AIzaSyDDjIg9vRzu8ap3Wt0KQQT-rAFf7rqWoRE",
-    authDomain: "aidoser.firebaseapp.com",
-    databaseURL: "https://aidoser-default-rtdb.firebaseio.com",
-    projectId: "aidoser",
-    storageBucket: "aidoser.firebasestorage.app",
-    messagingSenderId: "838844198786",
-    appId: "1:838844198786:web:037fd66c256f074a21a99b"
-  };
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
-  firebase.initializeApp(firebaseConfig);
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyDDjIg9vRzu8ap3Wt0KQQT-rAFf7rqWoRE",
+      authDomain: "aidoser.firebaseapp.com",
+      databaseURL: "https://aidoser-default-rtdb.firebaseio.com",
+      projectId: "aidoser",
+      storageBucket: "aidoser.firebasestorage.app",
+      messagingSenderId: "838844198786",
+      appId: "1:838844198786:web:037fd66c256f074a21a99b"
+    };
 
-  var auth    = firebase.auth();
-  var db      = firebase.database();
-  var storage = firebase.storage();
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.database();
+    let activeDeviceId = null;
+    let paramsChart = null;
 
-  // DOM refs
-  var loginModal     = document.getElementById('loginModal');
-  var loginEmail     = document.getElementById('loginEmail');
-  var loginPassword  = document.getElementById('loginPassword');
-  var loginButton    = document.getElementById('loginButton');
-  var loginError     = document.getElementById('loginError');
-  var authStatusText = document.getElementById('authStatusText');
-  var logoutBtn      = document.getElementById('logoutBtn');
-  var dbStatusEl     = document.getElementById('dbStatus');
-  var deviceStatusEl = document.getElementById('deviceStatus');
-  var tankSizePill   = document.getElementById('tankSizePill');
-  var targetsPill    = document.getElementById('targetsPill');
-  var testForm       = document.getElementById('testForm');
-  var dosingDiv      = document.getElementById('dosing');
-  var paramsChartEl  = document.getElementById('paramsChart');
-  var dosingLogBody  = document.getElementById('dosingLogBody');
+    document.getElementById('loginButton').onclick = () => {
+      auth.signInWithEmailAndPassword(document.getElementById('loginEmail').value, document.getElementById('loginPassword').value)
+        .catch(e => document.getElementById('loginError').innerText = e.message);
+    };
+    document.getElementById('logoutBtn').onclick = () => auth.signOut();
 
-  // Tank volume modal refs
-  var tankModal         = document.getElementById('tankModal');
-  var tankVolumeInput   = document.getElementById('tankVolumeInput');
-  var tankResetCheckbox = document.getElementById('tankResetCheckbox');
-  var tankCancelBtn     = document.getElementById('tankCancelBtn');
-  var tankSaveBtn       = document.getElementById('tankSaveBtn');
-  var tankError         = document.getElementById('tankError');
-  var editTankBtn       = document.getElementById('editTankBtn');
-
-  // Live control & OTA refs
-  var liveStatusPill = document.getElementById('liveStatusPill');
-  var firmwareInfoEl = document.getElementById('firmwareInfo');
-  var lastSeenEl     = document.getElementById('lastSeen');
-  var liveDoseBtn    = document.getElementById('liveDoseBtn');
-  var otaFileInput   = document.getElementById('otaFile');
-  var otaUploadBtn   = document.getElementById('otaUploadBtn');
-  var otaStatusEl    = document.getElementById('otaStatus');
-
-  var paramsChartCtx = paramsChartEl ? paramsChartEl.getContext('2d') : null;
-
-  var appOptions     = firebase.app().options || {};
-  var activeDeviceId = null;
-  var testsRef       = null;
-  var dosingRef      = null;
-  var stateRef       = null;
-  var otaStatusRef   = null;
-  var paramsChart    = null;
-  var currentTankVolumeGallons = null;
-
-  // Init DB status
-  if (dbStatusEl) {
-    dbStatusEl.textContent = 'DB: ' + (appOptions.databaseURL || '(none)') + ' · signed out';
-  }
-
-  function showLoginModal() {
-    loginModal.classList.remove('hidden');
-    loginError.textContent = "";
-  }
-
-  function hideLoginModal() {
-    loginModal.classList.add('hidden');
-    loginError.textContent = "";
-  }
-
-  function showTankModal() {
-    if (!tankModal) return;
-    tankModal.classList.remove('hidden');
-    tankError.textContent = "";
-    if (tankVolumeInput) {
-      if (currentTankVolumeGallons != null) {
-        tankVolumeInput.value = currentTankVolumeGallons;
+    auth.onAuthStateChanged(user => {
+      if (user) {
+        document.getElementById('loginModal').classList.add('hidden');
+        db.ref(`users/${user.uid}/devices`).once('value', snap => {
+          if(snap.exists()){
+            activeDeviceId = Object.keys(snap.val())[0];
+            initApp();
+          }
+        });
       } else {
-        tankVolumeInput.value = '';
+        document.getElementById('loginModal').classList.remove('hidden');
       }
-    }
-    if (tankResetCheckbox) tankResetCheckbox.checked = false;
-  }
+    });
 
-  function hideTankModal() {
-    if (!tankModal) return;
-    tankModal.classList.add('hidden');
-    tankError.textContent = "";
-  }
-
-  // ----- Update dosing panel from dosingPlan object -----
-  function updateDosingFromPlan(plan) {
-    if (!dosingDiv) return;
-
-    if (!plan) {
-      dosingDiv.innerHTML = `
-        <div class="tag">
-          <div class="tag-dot"></div>
-          <span>No dosing plan set</span>
-          <small>0 ml / day</small>
-        </div>
-      `;
-      return;
-    }
-
-    var kalk = plan.kalk || 0;
-    var afr  = plan.afr  || 0;
-    var mg   = plan.mg   || 0;
-
-    dosingDiv.innerHTML = `
-      <div class="tag kalk">
-        <div class="tag-dot"></div>
-        <span>Kalkwasser</span>
-        <small>${Number(kalk).toFixed(1)} ml / day</small>
-      </div>
-      <div class="tag afr">
-        <div class="tag-dot"></div>
-        <span>All-For-Reef</span>
-        <small>${Number(afr).toFixed(1)} ml / day</small>
-      </div>
-      <div class="tag mg">
-        <div class="tag-dot"></div>
-        <span>Magnesium</span>
-        <small>${Number(mg).toFixed(1)} ml / day</small>
-      </div>
-    `;
-  }
-
-  // ----- Update chart & log from tests array -----
-  function updateChartFromTests(testArray) {
-    // Update log table
-    if (dosingLogBody) {
-      dosingLogBody.innerHTML = "";
-
-      if (Array.isArray(testArray) && testArray.length > 0) {
-        var sortedForLog = testArray.slice().sort(function(a, b) {
-          return (b.timestamp || 0) - (a.timestamp || 0);
-        }).reverse(); // newest first
-
-        var maxRows = 20;
-        sortedForLog.slice(0, maxRows).forEach(function(tp) {
-          var tr = document.createElement('tr');
-
-          var ts = tp.timestamp || 0;
-          var whenText = ts ? new Date(ts).toLocaleString() : "";
-
-          function td(text) {
-            var cell = document.createElement('td');
-            cell.textContent = text;
-            return cell;
-          }
-
-          tr.appendChild(td(whenText));
-          tr.appendChild(td(tp.ca  != null ? tp.ca  : ""));
-          tr.appendChild(td(tp.alk != null ? tp.alk : ""));
-          tr.appendChild(td(tp.mg  != null ? tp.mg  : ""));
-          tr.appendChild(td(tp.ph  != null ? tp.ph  : ""));
-
-          dosingLogBody.appendChild(tr);
+    function initApp() {
+      db.ref(`devices/${activeDeviceId}/dosingPlan`).on('value', s => {
+        const plan = s.val() || {};
+        const cont = document.getElementById('dosingContainer');
+        cont.innerHTML = '';
+        Object.keys(plan).forEach(k => {
+          cont.innerHTML += `<div class="tag"><div class="tag-dot"></div><span style="text-transform:capitalize">${k}</span>: ${plan[k]} ml/day</div>`;
         });
-      }
+      });
+
+      db.ref(`devices/${activeDeviceId}/state`).on('value', s => {
+        const st = s.val() || {};
+        const pill = document.getElementById('liveStatusPill');
+        pill.innerHTML = st.online ? '<div class="tag-dot" style="background:#4ade80"></div>Online' : '<div class="tag-dot" style="background:gray"></div>Offline';
+        document.getElementById('firmwareInfo').innerText = "FW: " + (st.fwVersion || "1.0.0");
+      });
+
+      db.ref(`devices/${activeDeviceId}/tests`).on('value', s => {
+        const data = s.val() || {};
+        const sorted = Object.values(data).sort((a,b) => a.timestamp - b.timestamp);
+        updateChart(sorted);
+        updateTable(sorted);
+      });
+
+      setupCalibrationUI();
     }
 
-    // Update chart
-    if (!paramsChartCtx) return;
+    // RESTORED: TRiggers OTA by notifying RTDB of the local selection
+    document.getElementById('otaUploadBtn').onclick = function() {
+      const fileInput = document.getElementById('otaFile');
+      if(fileInput.files.length === 0) return alert("Please select a .bin file from your local directory.");
+      
+      const fileName = fileInput.files[0].name;
+      const status = document.getElementById('otaStatus');
+      status.innerText = "Triggering OTA for: " + fileName;
 
-    if (!Array.isArray(testArray) || testArray.length === 0) {
-      if (paramsChart) {
-        paramsChart.destroy();
-        paramsChart = null;
-      }
-      return;
-    }
+      // Restored the trigger path for the Firebase Hosting local mapping
+      const hostingUrl = "https://aidoser.web.app/" + fileName;
 
-    // Sort ascending for chart
-    testArray.sort(function(a, b) {
-      return (a.timestamp || 0) - (b.timestamp || 0);
-    });
+      db.ref(`devices/${activeDeviceId}/otaRequest`).set({ 
+        url: hostingUrl, 
+        requestedAt: firebase.database.ServerValue.TIMESTAMP 
+      }).then(() => {
+        status.innerText = "OTA Request Sent. ESP32 is pulling from Hosting.";
+      }).catch(err => {
+        status.innerText = "Error: " + err.message;
+      });
+    };
 
-    var labels = [];
-    var caData = [];
-    var alkData = [];
-    var mgData  = [];
-    var phData  = [];
-
-    var t0 = testArray[0].timestamp || 0;
-
-    testArray.forEach(function(tp) {
-      var t = tp.timestamp || 0;
-      var days = t0 ? ((t - t0) / 86400000) : 0; // ms -> days
-      labels.push(days.toFixed(1));
-      caData.push(tp.ca  || 0);
-      alkData.push(tp.alk || 0);
-      mgData.push(tp.mg  || 0);
-      phData.push(tp.ph  || 0);
-    });
-
-    if (paramsChart) {
-      paramsChart.destroy();
-    }
-
-    paramsChart = new Chart(paramsChartCtx, {
-      type: 'line',
-      data: {
-        labels: labels,
-        datasets: [
-          {
-            label:'Ca (ppm)',
-            data: caData,
-            borderWidth:1,
-            tension:0.25,
-            yAxisID:'y'
-          },
-          {
-            label:'Mg (ppm)',
-            data: mgData,
-            borderWidth:1,
-            tension:0.25,
-            yAxisID:'y'
-          },
-          {
-            label:'Alk (dKH)',
-            data: alkData,
-            borderWidth:1,
-            tension:0.25,
-            yAxisID:'y1'
-          },
-          {
-            label:'pH',
-            data: phData,
-            borderWidth:1,
-            tension:0.25,
-            yAxisID:'y1'
-          }
-        ]
-      },
-      options:{
-        responsive:true,
-        maintainAspectRatio:false,
-        interaction: {
-          mode: 'index',
-          intersect: false
+    function updateChart(tests) {
+      if (paramsChart) paramsChart.destroy();
+      const ctx = document.getElementById('paramsChart').getContext('2d');
+      paramsChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: tests.map(t => new Date(t.timestamp).toLocaleDateString()),
+          datasets: [
+            { label: 'Alk (dKH)', data: tests.map(t => t.alk), tension: 0.3, yAxisID: 'yAlk' },
+            { label: 'Ca (ppm)',  data: tests.map(t => t.ca),  tension: 0.3, yAxisID: 'yPpm' },
+            { label: 'Mg (ppm)',  data: tests.map(t => t.mg),  tension: 0.3, yAxisID: 'yPpm' },
+            { label: 'pH',        data: tests.map(t => t.ph),  tension: 0.3, yAxisID: 'yPh'  }
+          ]
         },
-        scales:{
-          y:{
-            type:'linear',
-            position:'left',
-            title:{display:true,text:'Ca / Mg'},
-            grid: { color:'rgba(148,163,184,0.25)' },
-            ticks: { color:'#cbd5f5', font:{size:10} }
-          },
-          y1:{
-            type:'linear',
-            position:'right',
-            title:{display:true,text:'Alk / pH'},
-            grid: { drawOnChartArea:false },
-            ticks: { color:'#cbd5f5', font:{size:10} }
-          },
-          x:{
-            title:{display:true,text:'Days since first test'},
-            grid: { color:'rgba(148,163,184,0.22)' },
-            ticks: { color:'#cbd5f5', font:{size:9} }
-          }
-        },
-        plugins:{
-          legend:{
-            labels:{color:'#e2e8f0', font:{size:10}}
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          scales: {
+            y: { type: 'linear', display: true, position: 'left', grid: { color: 'rgba(255,255,255,0.05)' } },
+            y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false } }
           }
         }
-      }
-    });
-  }
-
-  // ----- Update live status pills -----
-  function updateLiveStatus(stateObj) {
-    stateObj = stateObj || {};
-    var online    = !!stateObj.online;
-    var fwVersion = stateObj.fwVersion || 'unknown';
-    var lastSeen  = stateObj.lastSeen || 0;
-
-    if (liveStatusPill) {
-      liveStatusPill.textContent = online ? 'ESP32: online' : 'ESP32: offline';
-      liveStatusPill.classList.remove('online', 'offline');
-      liveStatusPill.classList.add(online ? 'online' : 'offline');
-    }
-    if (firmwareInfoEl) {
-      firmwareInfoEl.textContent = 'FW: ' + fwVersion;
-    }
-    if (lastSeenEl) {
-      lastSeenEl.textContent = 'Last seen: ' + (lastSeen ? new Date(lastSeen).toLocaleString() : 'never');
-    }
-  }
-
-  // ----- Attach listeners for a given deviceId -----
-  function attachDeviceListeners(deviceId) {
-    if (testsRef)      testsRef.off();
-    if (dosingRef)     dosingRef.off();
-    if (stateRef)      stateRef.off();
-    if (otaStatusRef)  otaStatusRef.off();
-    testsRef      = null;
-    dosingRef     = null;
-    stateRef      = null;
-    otaStatusRef  = null;
-
-    if (!deviceId) {
-      if (deviceStatusEl) {
-        deviceStatusEl.textContent = 'Device: none selected';
-      }
-      updateChartFromTests([]);
-      updateDosingFromPlan(null);
-      updateLiveStatus(null);
-      if (otaStatusEl) otaStatusEl.textContent = '';
-      return;
-    }
-
-    if (deviceStatusEl) {
-      deviceStatusEl.textContent = 'Device: ' + deviceId;
-    }
-
-    testsRef      = db.ref('devices/' + deviceId + '/tests');
-    dosingRef     = db.ref('devices/' + deviceId + '/dosingPlan');
-    stateRef      = db.ref('devices/' + deviceId + '/state');
-    otaStatusRef  = db.ref('devices/' + deviceId + '/otaStatus');
-
-    // dosingPlan
-    dosingRef.on('value', function(snap) {
-      var plan = snap.val();
-      updateDosingFromPlan(plan);
-    });
-
-    // tests
-    testsRef.on('value', function(snap) {
-      var val = snap.val();
-      if (!val) {
-        updateChartFromTests([]);
-        return;
-      }
-      var arr = [];
-      Object.keys(val).forEach(function(key) {
-        var tp = val[key];
-        if (tp) arr.push(tp);
       });
-      updateChartFromTests(arr);
-    });
-
-    // meta & targets
-    var metaRef    = db.ref('devices/' + deviceId + '/meta');
-    var targetsRef = db.ref('devices/' + deviceId + '/settings/targets');
-
-    metaRef.on('value', function(snap) {
-      var meta = snap.val();
-      if (!meta) return;
-      if (tankSizePill && meta.tankVolumeGallons) {
-        tankSizePill.textContent = meta.tankVolumeGallons + ' gal system';
-      }
-      currentTankVolumeGallons = meta.tankVolumeGallons || null;
-    });
-
-    targetsRef.on('value', function(snap) {
-      var t = snap.val();
-      if (!t || !targetsPill) return;
-      var alk = t.alk || 0;
-      var ca  = t.ca  || 0;
-      var mg  = t.mg  || 0;
-      var ph  = t.ph  || 0;
-      targetsPill.textContent =
-        'Targets: Alk ' + alk + ' · Ca ' + ca + ' · Mg ' + mg + ' · pH ' + ph;
-    });
-
-    // state (real-time ESP status)
-    stateRef.on('value', function(snap) {
-      var stateObj = snap.val() || {};
-      updateLiveStatus(stateObj);
-    });
-
-    // OTA status
-    otaStatusRef.on('value', function(snap) {
-      if (!otaStatusEl) return;
-      var st = snap.val();
-      if (!st) {
-        otaStatusEl.textContent = '';
-        return;
-      }
-      var msg = 'OTA status: ' + (st.status || '');
-      if (st.error) {
-        msg += ' – ' + st.error;
-      }
-      otaStatusEl.textContent = msg;
-    });
-  }
-
-  // ----- Login click -----
-  loginButton.addEventListener('click', function() {
-    var email = loginEmail.value.trim();
-    var password = loginPassword.value;
-
-    loginError.textContent = "";
-
-    if (!email || !password) {
-      loginError.textContent = "Please enter email and password.";
-      return;
     }
 
-    auth.signInWithEmailAndPassword(email, password)
-      .catch(function(err) {
-        loginError.textContent = err.message || "Login failed.";
+    function updateTable(tests) {
+      const body = document.getElementById('logBody');
+      body.innerHTML = '';
+      [...tests].reverse().forEach(t => {
+        body.innerHTML += `<tr><td>${new Date(t.timestamp).toLocaleDateString()}</td><td>${t.alk}</td><td>${t.ca}</td><td>${t.mg}</td><td>${t.ph}</td></tr>`;
       });
-  });
-
-  // Enter key on password
-  loginPassword.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') {
-      loginButton.click();
     }
-  });
 
-  // Logout
-  logoutBtn.addEventListener('click', function() {
-    auth.signOut().catch(function(err) {
-      console.error("Logout error:", err);
-    });
-  });
+    function setupCalibrationUI() {
+      const names = ["Kalkwasser (P1)", "All-For-Reef (P2)", "Magnesium (P3)", "Auxiliary (P4)"];
+      const grid = document.getElementById('calGrid');
+      grid.innerHTML = '';
+      
+      names.forEach((name, i) => {
+        const n = i + 1;
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.style.textAlign = 'center';
+        card.innerHTML = `
+          <div style="font-size:0.65rem; color:var(--text-soft); margin-bottom:5px;">PUMP ${n}</div>
+          <div style="font-weight:bold; margin-bottom:15px; color:var(--accent);">${name}</div>
+          <button id="startCal${n}" class="btn-action" style="background:var(--success); margin:0;">Start 60s Test</button>
+          <input id="calPump${n}Ml" type="number" placeholder="ml caught" style="margin: 15px 0; text-align:center;">
+          <button id="saveCal${n}" class="btn-outline-soft" style="width:100%; padding: 12px;">Save ml/min</button>
+          <div id="calStatus${n}" style="margin-top:10px;font-size:12px;color:var(--text-soft);text-align:center;"></div>
+        `;
+        grid.appendChild(card);
 
-  // ----- Tank modal buttons -----
-  if (editTankBtn) {
-    editTankBtn.addEventListener('click', function() {
-      if (!activeDeviceId) {
-        alert('No device selected. Log in to a tank owner account first.');
-        return;
-      }
-      showTankModal();
-    });
-  }
+        const startBtn = document.getElementById(`startCal${n}`);
+        startBtn.onclick = function() {
+          this.disabled = true;
+          db.ref(`devices/${activeDeviceId}/commands/calibrate`).set({ trigger:true, pump: n, durationSec: 60, status: "pending", ts: Date.now() });
+          
+          let seconds = 60;
+          const timer = setInterval(() => {
+            this.innerText = `Running... ${seconds}s`;
+            seconds--;
+            if (seconds < 0) {
+              clearInterval(timer);
+              this.disabled = false;
+              this.innerText = "Start 60s Test";
+            }
+          }, 1000);
+        };
 
-  if (tankCancelBtn) {
-    tankCancelBtn.addEventListener('click', function() {
-      hideTankModal();
-    });
-  }
+        document.getElementById(`saveCal${n}`).onclick = async () => {
+          const statusEl = document.getElementById(`calStatus${n}`);
+          const valRaw = document.getElementById(`calPump${n}Ml`).value;
+          const val = parseFloat(valRaw);
+          if(!isFinite(val) || val <= 0) return alert("Measure the output first (enter ml caught).");
 
-  if (tankSaveBtn) {
-    tankSaveBtn.addEventListener('click', function() {
-      tankError.textContent = "";
+          if (!activeDeviceId) return alert("No active device selected.");
 
-      if (!activeDeviceId) {
-        alert('No device selected. Log in to a tank owner account first.');
-        hideTankModal();
-        return;
-      }
-
-      var v = parseFloat(tankVolumeInput.value);
-      if (isNaN(v) || v <= 0) {
-        tankError.textContent = 'Please enter a valid tank volume in gallons.';
-        return;
-      }
-
-      var reset = tankResetCheckbox && tankResetCheckbox.checked;
-
-      var confirmMsg =
-        'You are changing the tank volume to ' + v + ' gallons.\n\n' +
-        'This will affect all future dosing calculations.';
-      if (reset) {
-        confirmMsg += '\n\nYou also selected to reset AI dosing history (clear test log and mark a reset point).';
-      }
-      confirmMsg += '\n\nAre you sure you want to continue?';
-
-      if (!window.confirm(confirmMsg)) {
-        return;
-      }
-
-      var basePath = 'devices/' + activeDeviceId;
-      var updates = {};
-      updates[basePath + '/meta/tankVolumeGallons'] = v;
-
-      if (reset) {
-        updates[basePath + '/tests'] = null;
-        updates[basePath + '/meta/adaptiveResetAt'] = firebase.database.ServerValue.TIMESTAMP;
-      }
-
-      db.ref().update(updates).then(function() {
-        hideTankModal();
-      }).catch(function(err) {
-        tankError.textContent = 'Error saving: ' + (err.message || err);
+          statusEl.innerText = "Saving…";
+          try {
+            await db.ref(`devices/${activeDeviceId}/calibration/pumps/pump${n}`).set({
+              ml_per_min: val,      // 60 seconds test => ml/min
+              ml_per_60s: val,
+              ts: Date.now()
+            });
+            statusEl.innerText = "✅ Saved to cloud. Waiting for ESP32 to apply…";
+          } catch (err) {
+            statusEl.innerText = "❌ Save failed: " + (err?.message || err);
+          }
+        };
       });
-    });
-  }
+    }
 
-  // ----- Handle New Test form submit (write to RTDB) -----
-  if (testForm) {
-    testForm.addEventListener('submit', function(e) {
+    document.getElementById('testForm').onsubmit = (e) => {
       e.preventDefault();
-
-      if (!activeDeviceId) {
-        alert('No device selected. Make sure you are logged in and have a device linked.');
-        return;
-      }
-
-      var ca  = parseFloat(document.getElementById('ca').value);
-      var alk = parseFloat(document.getElementById('alk').value);
-      var mg  = parseFloat(document.getElementById('mg').value);
-      var ph  = parseFloat(document.getElementById('ph').value);
-
-      if (isNaN(ca) || isNaN(alk) || isNaN(mg) || isNaN(ph)) {
-        alert('Please fill in all test values.');
-        return;
-      }
-
-      var testData = {
-        ca:  ca,
-        alk: alk,
-        mg:  mg,
-        ph:  ph,
-        timestamp: firebase.database.ServerValue.TIMESTAMP
-      };
-
-      var refPath = 'devices/' + activeDeviceId + '/tests';
-
-      db.ref(refPath).push(testData)
-        .then(function() {
-          // optional: testForm.reset();
-        })
-        .catch(function(err) {
-          alert('Error saving test: ' + (err.message || err));
-        });
-    });
-  }
-
-  // ----- Live Dose button -----
-  if (liveDoseBtn) {
-    liveDoseBtn.addEventListener('click', function() {
-      if (!activeDeviceId) {
-        alert('No device selected. Log in to a tank owner account first.');
-        return;
-      }
-
-      if (!window.confirm('Trigger an immediate dose using the current plan?')) {
-        return;
-      }
-
-      var cmdPath = 'devices/' + activeDeviceId + '/commands/liveDose';
-      var cmd = {
-        trigger: true,
-        requestedAt: firebase.database.ServerValue.TIMESTAMP
-      };
-
-      db.ref(cmdPath).set(cmd).then(function() {
-        alert('Live dose command sent. ESP32 will act when it sees this.');
-      }).catch(function(err) {
-        alert('Error sending live dose: ' + (err.message || err));
+      db.ref(`devices/${activeDeviceId}/tests`).push({
+        alk: parseFloat(document.getElementById('alk').value),
+        ca: parseFloat(document.getElementById('ca').value),
+        mg: parseFloat(document.getElementById('mg').value),
+        ph: parseFloat(document.getElementById('ph').value),
+        timestamp: Date.now()
       });
-    });
-  }
+      alert("Results synced with Reef AI.");
+    };
 
-    // ----- OTA OTA trigger via Hosting path (no Firebase Storage upload) -----
-  // This assumes you have already deployed a firmware file to Firebase Hosting at:
-  //   /devices/<deviceId>/firmware.bin
-  // For example: public/devices/reefDoser5/firmware.bin, then `firebase deploy --only hosting`
-  // When you click the button below, we simply write an otaRequest with:
-  //   { url, fileName, requestedAt, trigger: true }
-  // The ESP32 sees trigger===true and runs OTA from that URL.
-  if (otaUploadBtn) {
-    otaUploadBtn.addEventListener('click', function() {
-      if (!activeDeviceId) {
-        alert('No active device selected.');
-        return;
-      }
+    let calStatusUnsub = null;
+    function attachCalibrationStatusListener() {
+      if (!activeDeviceId) return;
+      const ackEl = document.getElementById('calibrationAck');
+      if (!ackEl) return;
 
-      var otaStatusEl   = document.getElementById('otaStatusText');
-      var otaFileInput  = document.getElementById('otaFileInput');
-      var fileName = 'firmware.bin';
+      // Detach old
+      if (calStatusUnsub) { try { calStatusUnsub(); } catch(e){} calStatusUnsub = null; }
 
-      // If user picked a file, we'll reuse that name as a convenience so your
-      // local file name matches the file you deploy to Hosting.
-      if (otaFileInput && otaFileInput.files && otaFileInput.files[0]) {
-        fileName = otaFileInput.files[0].name;
-      }
-
-      // Construct expected hosting URL, e.g. https://aidoser.web.app/devices/reefDoser5/firmware.bin
-      var origin = window.location.origin;
-      var url = origin + '/devices/' + activeDeviceId + '/' + fileName;
-
-      if (otaStatusEl) {
-        otaStatusEl.textContent = 'Requesting OTA from ' + url + ' …';
-      }
-
-      var reqPath = 'devices/' + activeDeviceId + '/otaRequest';
-      var reqData = {
-        url: url,
-        fileName: fileName,
-        requestedAt: firebase.database.ServerValue.TIMESTAMP,
-        trigger: true
+      const ref = db.ref(`devices/${activeDeviceId}/calibration/status`);
+      const handler = (snap) => {
+        const v = snap.val();
+        if (!v) { ackEl.innerText = "No calibration status from ESP32 yet."; return; }
+        const when = v.appliedAt ? new Date(v.appliedAt).toLocaleString() : "—";
+        const flows = v.flows || {};
+        const k = flows.kalk ?? "—";
+        const a = flows.afr ?? "—";
+        const m = flows.mg ?? "—";
+        const x = flows.aux ?? "—";
+        ackEl.innerText = `ESP32 applied: ${when}  |  KALK ${k} ml/min, AFR ${a}, MG ${m}, AUX ${x}`;
       };
-
-      db.ref(reqPath).set(reqData).then(function() {
-        if (otaStatusEl) {
-          otaStatusEl.textContent = 'OTA requested. ESP32 will update when it processes otaRequest.';
-        }
-      }).catch(function(err) {
-        console.error('Error writing OTA request:', err);
-        if (otaStatusEl) {
-          otaStatusEl.textContent = 'Error writing OTA request: ' + (err.message || err);
-        }
-      });
-    });
-  }
-
-
-  // ----- Auth state listener -----
-  auth.onAuthStateChanged(function(user) {
-    if (!user) {
-      showLoginModal();
-      authStatusText.textContent = "Not signed in";
-      if (dbStatusEl) {
-        dbStatusEl.textContent = 'DB: ' + (appOptions.databaseURL || '(none)') + ' · signed out';
-      }
-      if (deviceStatusEl) {
-        deviceStatusEl.textContent = 'Device: none selected';
-      }
-      activeDeviceId = null;
-      attachDeviceListeners(null);
-      return;
+      ref.on('value', handler);
+      calStatusUnsub = () => ref.off('value', handler);
     }
 
-    hideLoginModal();
-    authStatusText.textContent = "Signed in as " + (user.email || "user");
-    if (dbStatusEl) {
-      dbStatusEl.textContent = 'DB: ' + (appOptions.databaseURL || '(none)') + ' · signed in';
-    }
-
-    var uid = user.uid;
-    var userRef = db.ref('users/' + uid);
-
-    // Update email / lastLoginAt without overwriting devices
-    userRef.update({
-      email: user.email || null,
-      lastLoginAt: firebase.database.ServerValue.TIMESTAMP
-    }).catch(function(err) {
-      console.error('Error updating user node:', err);
-    });
-
-    // Resolve which devices this user has
-    userRef.child('devices').once('value').then(function(snap) {
-      var devMap = snap.val();
-
-      if (!devMap) {
-        if (deviceStatusEl) {
-          deviceStatusEl.textContent = 'Device: no devices linked to this account';
-        }
-        activeDeviceId = null;
-        attachDeviceListeners(null);
-        return;
-      }
-
-      var deviceIds = Object.keys(devMap);
-      if (deviceIds.length === 0) {
-        if (deviceStatusEl) {
-          deviceStatusEl.textContent = 'Device: no devices linked to this account';
-        }
-        activeDeviceId = null;
-        attachDeviceListeners(null);
-        return;
-      }
-
-      // For now: pick first device
-      var chosenId = deviceIds[0];
-      activeDeviceId = chosenId;
-
-      var devInfo = devMap[chosenId] || {};
-      var alias   = devInfo.alias || chosenId;
-
-      if (deviceStatusEl) {
-        deviceStatusEl.textContent = 'Device: ' + alias + ' (' + chosenId + ')';
-      }
-
-      attachDeviceListeners(chosenId);
-    }).catch(function(err) {
-      console.error('Error reading user devices:', err);
-      if (deviceStatusEl) {
-        deviceStatusEl.textContent = 'Device: error loading device list';
-      }
-      activeDeviceId = null;
-      attachDeviceListeners(null);
-    });
-  });
-</script>
+    document.getElementById('openCalibrationBtn').onclick = () => {
+      document.getElementById('calibrationOverlay').classList.remove('hidden');
+      attachCalibrationStatusListener();
+    };
+    document.getElementById('closeCalibrationBtn').onclick = () => {
+      document.getElementById('calibrationOverlay').classList.add('hidden');
+      if (calStatusUnsub) { try { calStatusUnsub(); } catch(e){} calStatusUnsub = null; }
+    };
+  </script>
 </body>
 </html>

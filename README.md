@@ -1,4 +1,5 @@
 Steps for OTA:
+THE CHIP HAS TO BE BURNED WITH THE DEVICEID SET TO reefDoser1,2,3,4,5,etc
  build the scetch and find in under C:\Users\mdroo\OneDrive\Documents\platformio\AIDoser\.pio\build\esp32doit-devkit-v1/firmware.bin
 
  Move that firmware.bin file to C:\Users\mdroo\OneDrive\Firebase\aidoser\public\devices\reefDoser5 or 1 or 2...

@@ -191,6 +191,8 @@ const float TANK_VOLUME_L = 1135.6f;
 const int PIN_PUMP_KALK = 25;
 const int PIN_PUMP_AFR  = 26;
 const int PIN_PUMP_MG   = 27;
+const int PIN_PUMP_AUX = 22; // Pump 4 (aux)
+
 
 // Measure each pump: run for 60 seconds into a cup, measure ml.
 float FLOW_KALK_ML_PER_MIN = 675.0f;
@@ -198,14 +200,16 @@ float FLOW_AFR_ML_PER_MIN  = 645.0f;
 float FLOW_MG_ML_PER_MIN   = 50.0f;
 
 
+
+float FLOW_AUX_ML_PER_MIN = 0.0f;   // Pump 4 (optional)
 // ===================== CHEMISTRY CONSTANTS =====================
 
 // ---------- KALKWASSER (saturated) ----------
-float DKH_PER_ML_KALK_TANK    = 0.00010f;   // +0.00010 dKH/ml in 300 gallons.00012
-float CA_PPM_PER_ML_KALK_TANK = 0.00070f;   // +0.00070 ppm Ca/ml .000704
+float DKH_PER_ML_KALK_TANK    = 0.00010f;   // +0.00010 dKH/ml in 300g
+float CA_PPM_PER_ML_KALK_TANK = 0.00070f;   // +0.00070 ppm Ca/ml
 
 // ---------- TROPIC MARIN ALL-FOR-REEF ----------
-float DKH_PER_ML_AFR_TANK     = 0.0052f;    // +0.0052 dKH/ml in 300 gallons
+float DKH_PER_ML_AFR_TANK     = 0.0052f;    // +0.0052 dKH/ml in 300g
 float CA_PPM_PER_ML_AFR_TANK  = 0.037f;     // +0.037 ppm Ca/ml
 float MG_PPM_PER_ML_AFR_TANK  = 0.006f;     // +0.006 ppm Mg/ml
 
@@ -263,6 +267,47 @@ void loadDosingFromPrefs() {
   Serial.print(dosing.ml_per_day_afr);
   Serial.print(" MG=");
   Serial.println(dosing.ml_per_day_mg);
+}
+
+
+// ===================== FLOW CALIBRATION (NVS PREFS) =====================
+// Persist calibrated pump flow rates so they survive reboots.
+// Keys: fk, fa, fm, fx
+void loadFlowFromPrefs() {
+  if (!dosingPrefs.begin("flow", true)) {
+    Serial.println("Prefs: failed to open flow (read)");
+    return;
+  }
+Serial.println("saved flow/min value");
+  FLOW_KALK_ML_PER_MIN = dosingPrefs.getFloat("fk", FLOW_KALK_ML_PER_MIN);
+  FLOW_AFR_ML_PER_MIN  = dosingPrefs.getFloat("fa", FLOW_AFR_ML_PER_MIN);
+  FLOW_MG_ML_PER_MIN   = dosingPrefs.getFloat("fm", FLOW_MG_ML_PER_MIN);
+  FLOW_AUX_ML_PER_MIN  = dosingPrefs.getFloat("fx", FLOW_AUX_ML_PER_MIN);
+
+  dosingPrefs.end();
+
+  Serial.print("Prefs: loaded flow KALK=");
+  Serial.print(FLOW_KALK_ML_PER_MIN);
+  Serial.print(" AFR=");
+  Serial.print(FLOW_AFR_ML_PER_MIN);
+  Serial.print(" MG=");
+  Serial.print(FLOW_MG_ML_PER_MIN);
+  Serial.print(" AUX=");
+  Serial.println(FLOW_AUX_ML_PER_MIN);
+}
+
+void saveFlowToPrefs() {
+  if (!dosingPrefs.begin("flow", false)) {
+    Serial.println("Prefs: failed to open flow (write)");
+    return;
+  }
+
+  dosingPrefs.putFloat("fk", FLOW_KALK_ML_PER_MIN);
+  dosingPrefs.putFloat("fa", FLOW_AFR_ML_PER_MIN);
+  dosingPrefs.putFloat("fm", FLOW_MG_ML_PER_MIN);
+  dosingPrefs.putFloat("fx", FLOW_AUX_ML_PER_MIN);
+
+  dosingPrefs.end();
 }
 
 void saveDosingToPrefs() {
@@ -930,6 +975,170 @@ bool firebaseCheckAndHandleLiveDose() {
 }
 
 
+
+// ===================== FIREBASE: CALIBRATE COMMAND =====================
+// UI writes:
+//  devices/<id>/commands/calibrate = {trigger:true, pump:1..4, durationSec:60, ts:<ms>}
+// ESP32 runs that pump for durationSec seconds, then clears trigger and stores lastRun.
+int pumpNumToPin(int pump) {
+  switch (pump) {
+    case 1: return PIN_PUMP_KALK;
+    case 2: return PIN_PUMP_AFR;
+    case 3: return PIN_PUMP_MG;
+    case 4: return PIN_PUMP_AUX;
+    default: return -1;
+  }
+}
+
+bool firebaseCheckAndHandleCalibrate() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  String path = "/devices/" + String(DEVICE_ID) + "/commands/calibrate";
+  String payload = firebaseGetJson(path);
+  if (payload.length() == 0 || payload == "null") return false;
+
+  Serial.print("calibrate payload: ");
+  Serial.println(payload);
+
+  // trigger
+  int trigIdx = payload.indexOf("\"trigger\"");
+  if (trigIdx < 0) return false;
+  int colonIdx = payload.indexOf(':', trigIdx);
+  if (colonIdx < 0) return false;
+  String valStr = payload.substring(colonIdx + 1);
+  valStr.trim();
+  bool trigger = valStr.startsWith("true");
+
+  if (!trigger) return false;
+
+  // pump number (default 1)
+  int pump = 1;
+  int pIdx = payload.indexOf("\"pump\"");
+  if (pIdx >= 0) {
+    int pColon = payload.indexOf(':', pIdx);
+    if (pColon >= 0) {
+      String pStr = payload.substring(pColon + 1);
+      pStr.trim();
+      pump = pStr.toInt();
+    }
+  }
+
+  // duration seconds (default 60)
+  int durationSec = 60;
+  int dIdx = payload.indexOf("\"durationSec\"");
+  if (dIdx >= 0) {
+    int dColon = payload.indexOf(':', dIdx);
+    if (dColon >= 0) {
+      String dStr = payload.substring(dColon + 1);
+      dStr.trim();
+      durationSec = dStr.toInt();
+      if (durationSec <= 0) durationSec = 60;
+      if (durationSec > 300) durationSec = 300; // safety cap
+    }
+  }
+
+  int pin = pumpNumToPin(pump);
+  if (pin < 0) {
+    Serial.println("Calibrate: invalid pump number");
+  } else {
+    Serial.printf("Calibrate: running pump %d on pin %d for %d sec...\n", pump, pin, durationSec);
+    giveDose(pin, (float)durationSec);
+    Serial.println("Calibrate: done.");
+  }
+
+  // Clear trigger and write lastRun
+  time_t nowSec = time(NULL);
+  uint64_t tsMs = (nowSec > 0) ? (uint64_t)nowSec * 1000ULL : (uint64_t)millis();
+
+  String clearJson = "{";
+  clearJson += "\"trigger\":false,";
+  clearJson += "\"lastRun\":" + String((unsigned long long)tsMs) + ",";
+  clearJson += "\"pump\":" + String(pump) + ",";
+  clearJson += "\"durationSec\":" + String(durationSec);
+  clearJson += "}";
+
+  firebasePutJson(path, clearJson);
+
+  return true;
+}
+
+// ===================== FIREBASE: READ CALIBRATION VALUES =====================
+// UI saves to:
+//  devices/<id>/calibration/pumps/pumpN = {ml_per_min:<float>, ts:<ms>}
+// ESP32 pulls these periodically and updates FLOW_* variables + persists them.
+bool firebaseSyncFlowCalibrationOnce() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  String path = "/devices/" + String(DEVICE_ID) + "/calibration/pumps";
+  String payload = firebaseGetJson(path);
+  if (payload.length() == 0 || payload == "null") return false;
+
+  // Very small JSON pull parser (no ArduinoJson dependency).
+  auto extractFloat = [&](const String& key, float currentVal) -> float {
+    int k = payload.indexOf(key);
+    if (k < 0) return currentVal;
+    int c = payload.indexOf(':', k);
+    if (c < 0) return currentVal;
+    String s = payload.substring(c + 1);
+    s.trim();
+    // stop at comma/brace
+    int end = s.indexOf(',');
+    if (end < 0) end = s.indexOf('}');
+    if (end > 0) s = s.substring(0, end);
+    s.trim();
+    float v = s.toFloat();
+    if (v <= 0.0f) return currentVal;
+    return v;
+  };
+
+  float newK = extractFloat("\"ml_per_min\"", FLOW_KALK_ML_PER_MIN); // pump1 likely first hit
+  // Because keys repeat per pump, we parse per pump blocks:
+  auto parsePump = [&](int pump, float currentVal) -> float {
+    String pumpKey = "\"pump" + String(pump) + "\"";
+    int p = payload.indexOf(pumpKey);
+    if (p < 0) return currentVal;
+    int mp = payload.indexOf("\"ml_per_min\"", p);
+    if (mp < 0) return currentVal;
+    int c = payload.indexOf(':', mp);
+    if (c < 0) return currentVal;
+    String s = payload.substring(c + 1);
+    s.trim();
+    int end = s.indexOf(',');
+    if (end < 0) end = s.indexOf('}');
+    if (end > 0) s = s.substring(0, end);
+    s.trim();
+    float v = s.toFloat();
+    if (v <= 0.0f) return currentVal;
+    return v;
+  };
+
+  float fk = parsePump(1, FLOW_KALK_ML_PER_MIN);
+  float fa = parsePump(2, FLOW_AFR_ML_PER_MIN);
+  float fm = parsePump(3, FLOW_MG_ML_PER_MIN);
+  float fx = parsePump(4, FLOW_AUX_ML_PER_MIN);
+
+  bool changed = (fk != FLOW_KALK_ML_PER_MIN) || (fa != FLOW_AFR_ML_PER_MIN) || (fm != FLOW_MG_ML_PER_MIN) || (fx != FLOW_AUX_ML_PER_MIN);
+
+  FLOW_KALK_ML_PER_MIN = fk;
+  FLOW_AFR_ML_PER_MIN  = fa;
+  FLOW_MG_ML_PER_MIN   = fm;
+  FLOW_AUX_ML_PER_MIN  = fx;
+
+  if (changed) {
+    Serial.print("Flow updated from RTDB: KALK=");
+    Serial.print(FLOW_KALK_ML_PER_MIN);
+    Serial.print(" AFR=");
+    Serial.print(FLOW_AFR_ML_PER_MIN);
+    Serial.print(" MG=");
+    Serial.print(FLOW_MG_ML_PER_MIN);
+    Serial.print(" AUX=");
+    Serial.println(FLOW_AUX_ML_PER_MIN);
+    saveFlowToPrefs();
+  }
+
+  return changed;
+}
+
 // ===================== FIREBASE: OTA STATUS & REQUEST =====================
 
 void firebaseSetOtaStatus(const String& status, const String& error) {
@@ -1213,12 +1422,15 @@ void setup(){
   pinMode(PIN_PUMP_KALK, OUTPUT);
   pinMode(PIN_PUMP_AFR,  OUTPUT);
   pinMode(PIN_PUMP_MG,   OUTPUT);
+  pinMode(PIN_PUMP_AUX,  OUTPUT);
   digitalWrite(PIN_PUMP_KALK, LOW);
   digitalWrite(PIN_PUMP_AFR,  LOW);
   digitalWrite(PIN_PUMP_MG,   LOW);
+  digitalWrite(PIN_PUMP_AUX,  LOW);
 
   // Load last saved AI dosing plan from NVS (if any)
   loadDosingFromPrefs();
+  loadFlowFromPrefs();
   updatePumpSchedules();
   lastSafetyBackoffTs = nowSeconds();
 
@@ -1287,7 +1499,16 @@ void loop(){
     firebaseCheckAndHandleResetAi();
     firebaseCheckAndHandleLiveDose();
     firebaseCheckAndHandleOtaRequest();
+    firebaseCheckAndHandleCalibrate();
   }
+
+  // Periodically pull calibration values (ml/min) from RTDB (so ESP32 uses what you saved in UI)
+  static unsigned long lastFlowSyncMs = 0;
+  if (nowMs - lastFlowSyncMs >= 30000UL) { // every 30s
+    lastFlowSyncMs = nowMs;
+    firebaseSyncFlowCalibrationOnce();
+  }
+
 
   // Send state heartbeat every 30s
   static unsigned long lastStateHeartbeatMs = 0;
