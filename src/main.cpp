@@ -52,6 +52,7 @@ WiFiClientSecure secureClient;
 
 Preferences dosingPrefs;
 
+void firebaseSetCalibrationStatus();
 
 // Build full Firebase URL from a path (e.g. "/devices/reefDoser1/commands/resetAi")
 String firebaseUrl(const String& path) {
@@ -278,7 +279,7 @@ void loadFlowFromPrefs() {
     Serial.println("Prefs: failed to open flow (read)");
     return;
   }
-Serial.println("saved flow/min value");
+
   FLOW_KALK_ML_PER_MIN = dosingPrefs.getFloat("fk", FLOW_KALK_ML_PER_MIN);
   FLOW_AFR_ML_PER_MIN  = dosingPrefs.getFloat("fa", FLOW_AFR_ML_PER_MIN);
   FLOW_MG_ML_PER_MIN   = dosingPrefs.getFloat("fm", FLOW_MG_ML_PER_MIN);
@@ -517,29 +518,127 @@ uint64_t getEpochMillis() {
   return (uint64_t)millis();
 }
 
+
+// ===================== ALERT / PUSH THROTTLING =====================
+// Prevent RTDB from filling up with duplicate alerts & pushes.
+// We keep a small in-RAM "cooldown" table keyed by a short string.
+struct ThrottleEntry { const char* key; uint64_t lastTs; };
+static ThrottleEntry gThrottle[] = {
+  {"boot_push", 0},
+  {"offline_push", 0},
+  {"safety_scale", 0},
+  {"test_ignored", 0},
+  {"ota_fail", 0},
+  {"wifi_fail", 0},
+  {"generic_alert", 0},
+    {"no_tests", 0},
+    {"dose_kalk", 0},
+    {"dose_afr", 0},
+    {"dose_mg", 0},
+    {"dose_live", 0},
+    {"online_state", 0},
+};
+static const size_t gThrottleCount = sizeof(gThrottle)/sizeof(gThrottle[0]);
+
+bool allowThrottled(const char* key, uint64_t cooldownMs) {
+  uint64_t now = getEpochMillis();
+  for (size_t i = 0; i < gThrottleCount; i++) {
+    if (strcmp(gThrottle[i].key, key) == 0) {
+      if (gThrottle[i].lastTs == 0 || (now - gThrottle[i].lastTs) >= cooldownMs) {
+        gThrottle[i].lastTs = now;
+        return true;
+      }
+      return false;
+    }
+  }
+  // Unknown key: allow but don't track (or track under generic)
+  return true;
+}
+
+
+// Helper: basic JSON string escaping (quotes, backslash, newlines)
+String jsonEscape(const String& s) {
+  String out;
+  out.reserve(s.length() + 8);
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '\\') out += "\\\\";
+    else if (c == '"') out += "\\\"";
+    else if (c == '\n') out += "\\n";
+    else if (c == '\r') out += "\\r";
+    else if (c == '\t') out += "\\t";
+    else out += c;
+  }
+  return out;
+}
+
 // Helper: push an alert into Firebase RTDB under /devices/{DEVICE_ID}/alerts
 // This replaces the old IFTTT push usage – your Cloud Function can listen
 // to /devices/{deviceId}/alerts and fan out SMS / email.
+
+// Helper: push an alert into Firebase RTDB.
+// To stop the DB growing out of control:
+//  1) Always overwrite a "latest" slot: /devices/{DEVICE_ID}/alertsLatest/{type}
+//  2) Optionally POST into /devices/{DEVICE_ID}/alerts (history) only if throttle allows.
 void firebasePushAlert(const String& type,
                        const String& title,
                        const String& body,
-                       const String& extra) {
-  String path = "/devices/" + String(DEVICE_ID) + "/alerts";
-
+                       const String& extra,
+                       const char* throttleKey,
+                       uint64_t cooldownMs) {
   uint64_t ts = getEpochMillis();
 
-  // Build a small JSON object
   String json = "{";
-  json += "\"type\":\"" + type + "\"";
-  json += ",\"title\":\"" + title + "\"";
-  json += ",\"body\":\"" + body + "\"";
-  json += ",\"extra\":\"" + extra + "\"";
+  json += "\"type\":\"" + jsonEscape(type) + "\"";
+  json += ",\"title\":\"" + jsonEscape(title) + "\"";
+  json += ",\"body\":\"" + jsonEscape(body) + "\"";
+  json += ",\"extra\":\"" + jsonEscape(extra) + "\"";
   json += ",\"deviceId\":\"" + String(DEVICE_ID) + "\"";
   json += ",\"timestamp\":" + String((unsigned long long)ts);
   json += "}";
 
-  firebasePostJson(path, json);
+  // Overwrite latest
+  firebasePutJson("/devices/" + String(DEVICE_ID) + "/alertsLatest/" + type, json);
+
+  // Push to history only occasionally
+  if (allowThrottled(throttleKey ? throttleKey : "generic_alert", cooldownMs)) {
+    firebasePostJson("/devices/" + String(DEVICE_ID) + "/alerts", json);
+  }
 }
+
+
+// Helper: push a PUSH notification into Firebase RTDB under
+// /devices/{DEVICE_ID}/notifications (Cloud Function listens for child create)
+bool firebasePushNotification(const String& severity,
+                              const String& title,
+                              const String& body) {
+  String path = "/devices/" + String(DEVICE_ID) + "/notifications";
+
+  uint64_t ts = getEpochMillis();
+
+  String json = "{";
+  json += "\"severity\":\"" + jsonEscape(severity) + "\"";
+  json += ",\"title\":\"" + jsonEscape(title) + "\"";
+  json += ",\"body\":\"" + jsonEscape(body) + "\"";
+  json += ",\"deviceId\":\"" + String(DEVICE_ID) + "\"";
+  json += ",\"ts\":" + String((unsigned long long)ts);
+  json += "}";
+
+  // POST -> creates a unique key each time (required for onCreate trigger)
+  return firebasePostJson(path, json);
+}
+
+// Throttled push notification helper (reduces spam).
+bool firebasePushNotificationThrottled(const char* throttleKey,
+                                      uint64_t cooldownMs,
+                                      const String& severity,
+                                      const String& title,
+                                      const String& body) {
+  if (!allowThrottled(throttleKey ? throttleKey : "generic_alert", cooldownMs)) return false;
+  return firebasePushNotification(severity, title, body);
+}
+
+
 
 // ===================== SAFETY: CHEMISTRY-BASED CAPS =====================
 
@@ -588,7 +687,9 @@ void enforceChemSafetyCaps() {
     firebasePushAlert("safety",
                       "Dosing scaled by safety",
                       "scale=" + String(scale, 3),
-                      getLocalTimeString());
+                      getLocalTimeString(),
+                      "safety_scale",
+                      6ULL*60ULL*60ULL*1000ULL);  // 6 hours
   }
 }
 
@@ -625,7 +726,9 @@ void resetAIState() {
   firebasePushAlert("reset",
                     "AI dosing engine reset",
                     WiFi.localIP().toString(),
-                    getLocalTimeString());
+                    getLocalTimeString(),
+                    "generic_alert",
+                    30ULL*60ULL*1000ULL);  // 30 min
 
   Serial.println("AI state reset complete.");
 }
@@ -768,7 +871,9 @@ void safetyBackoffIfNoTests() {
   firebasePushAlert("safety",
                     "No tests >5 days",
                     "Dosing backed off to 70%",
-                    getLocalTimeString());
+                    getLocalTimeString(),
+                    "no_tests",
+                    24ULL*60ULL*60ULL*1000ULL);
 }
 
 
@@ -825,28 +930,34 @@ void maybeDosePumpsRealTime(){
       // --- Kalk dose & Firebase alert ---
       if (SEC_PER_DOSE_KALK > 0.0f && mlPerDoseKalk > 0.0f) {
         giveDose(PIN_PUMP_KALK, SEC_PER_DOSE_KALK);
-        firebasePushAlert("dose",
+        /*firebasePushAlert("dose",
                           "Kalk dose",
                           String(mlPerDoseKalk, 1) + " ml",
-                          timeStr);
+                          timeStr,
+                          "dose_kalk",
+                          30ULL*60ULL*1000ULL);*/
       }
 
       // --- AFR dose & IFTTT ---
       if (SEC_PER_DOSE_AFR > 0.0f && mlPerDoseAfr > 0.0f) {
         giveDose(PIN_PUMP_AFR, SEC_PER_DOSE_AFR);
-        firebasePushAlert("dose",
+        /*firebasePushAlert("dose",
                           "AllForReef dose",
                           String(mlPerDoseAfr, 1) + " ml",
-                          timeStr);
+                          timeStr,
+                          "dose_afr",
+                          30ULL*60ULL*1000ULL);*/
       }
 
       // --- Mg dose & Firebase alert ---
       if (SEC_PER_DOSE_MG > 0.0f && mlPerDoseMg > 0.0f) {
         giveDose(PIN_PUMP_MG, SEC_PER_DOSE_MG);
-        firebasePushAlert("dose",
+        /*firebasePushAlert("dose",
                           "Magnesium dose",
                           String(mlPerDoseMg, 1) + " ml",
-                          timeStr);
+                          timeStr,
+                          "dose_mg",
+                          30ULL*60ULL*1000ULL);*/
       }
 
       slotDone[i] = true;
@@ -903,24 +1014,30 @@ void runLiveDoseOnce() {
 
   if (SEC_PER_DOSE_KALK > 0.0f && mlPerDoseKalk > 0.0f) {
     giveDose(PIN_PUMP_KALK, SEC_PER_DOSE_KALK);
-    firebasePushAlert("dose",
+    /*firebasePushAlert("dose",
                       "LiveDose-Kalk",
                       String(mlPerDoseKalk, 1) + " ml",
-                      timeStr);
+                      timeStr,
+                      "dose_live",
+                      10ULL*60ULL*1000ULL);*/
   }
   if (SEC_PER_DOSE_AFR > 0.0f && mlPerDoseAfr > 0.0f) {
     giveDose(PIN_PUMP_AFR, SEC_PER_DOSE_AFR);
-    firebasePushAlert("dose",
+    /*firebasePushAlert("dose",
                       "LiveDose-AFR",
                       String(mlPerDoseAfr, 1) + " ml",
-                      timeStr);
+                      timeStr,
+                      "dose_live",
+                      10ULL*60ULL*1000ULL);*/
   }
   if (SEC_PER_DOSE_MG > 0.0f && mlPerDoseMg > 0.0f) {
     giveDose(PIN_PUMP_MG, SEC_PER_DOSE_MG);
-    firebasePushAlert("dose",
+    /*firebasePushAlert("dose",
                       "LiveDose-Mg",
                       String(mlPerDoseMg, 1) + " ml",
-                      timeStr);
+                      timeStr,
+                      "dose_live",
+                      10ULL*60ULL*1000ULL);*/
   }
 
   Serial.println("=== LIVE DOSE COMPLETE ===");
@@ -1134,9 +1251,30 @@ bool firebaseSyncFlowCalibrationOnce() {
     Serial.print(" AUX=");
     Serial.println(FLOW_AUX_ML_PER_MIN);
     saveFlowToPrefs();
+    firebaseSetCalibrationStatus();
   }
 
   return changed;
+}
+
+
+// ===================== FIREBASE: CALIBRATION STATUS (ACK) =====================
+// Writes /devices/<id>/calibration/status so the UI can show "ESP applied" acknowledgement.
+void firebaseSetCalibrationStatus() {
+  String path = "/devices/" + String(DEVICE_ID) + "/calibration/status";
+
+  // Use epoch ms
+  uint64_t tsMs = getEpochMillis();
+  String json = "{";
+  json += "\"appliedAt\":" + String((unsigned long long)tsMs) + ",";
+  json += "\"flows\":{";
+  json += "\"kalk\":" + String(FLOW_KALK_ML_PER_MIN, 2) + ",";
+  json += "\"afr\":" + String(FLOW_AFR_ML_PER_MIN, 2) + ",";
+  json += "\"mg\":" + String(FLOW_MG_ML_PER_MIN, 2) + ",";
+  json += "\"aux\":" + String(FLOW_AUX_ML_PER_MIN, 2);
+  json += "}";
+  json += "}";
+  firebasePutJson(path, json);
 }
 
 // ===================== FIREBASE: OTA STATUS & REQUEST =====================
@@ -1472,18 +1610,36 @@ void setup(){
   server.begin();
   Serial.println("HTTP server started");
 
-  // Firebase: report we are online (Cloud Function can send SMS/email)
-  firebasePushAlert("online",
-                    "Reef doser booted",
-                    WiFi.localIP().toString(),
-                    getLocalTimeString());
+  // Firebase: send ONE push at boot (Cloud Function will deliver to iPhone)
+  firebasePushNotificationThrottled("boot_push", 30ULL*60ULL*1000ULL,
+    "critical",
+    "ReefDoser Online",
+    String(DEVICE_ID) + " booted. IP " + WiFi.localIP().toString());
 
-  // Initial Firebase state heartbeat
-  firebaseSendStateHeartbeat();
 }
 
 void loop(){
   server.handleClient();
+
+  // Push notification only when device goes OFFLINE (WiFi down for >2 minutes).
+  // This avoids spam and relies on your Cloud Function to deliver iPhone push.
+  static unsigned long wifiDownSinceMs = 0;
+  static bool offlineNotified = false;
+  if (WiFi.status() != WL_CONNECTED) {
+    if (wifiDownSinceMs == 0) wifiDownSinceMs = millis();
+    if (!offlineNotified && (millis() - wifiDownSinceMs) > 120000UL) {
+      // Throttle: at most once per 30 minutes
+      firebasePushNotificationThrottled("offline_push", 30ULL*60ULL*1000ULL,
+        "critical",
+        "ReefDoser Offline",
+        String(DEVICE_ID) + " lost WiFi. Last IP " + WiFi.localIP().toString());
+      offlineNotified = true;
+    }
+  } else {
+    wifiDownSinceMs = 0;
+    offlineNotified = false; // allow a future offline push if it drops again
+  }
+
 
   safetyBackoffIfNoTests();
 

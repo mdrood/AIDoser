@@ -26,7 +26,7 @@
   .shell { width: 100%; max-width: 1100px; }
   .glass-panel { background: var(--bg-card); border-radius: 18px; border: 1px solid var(--border); padding: 25px; backdrop-filter: blur(20px); box-shadow: 0 24px 60px rgba(15, 23, 42, 0.9); }
   
-  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 30px; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 30px; gap: 12px; }
   .header-left { display: flex; align-items: center; gap: 15px; }
   
   .reef-icon {
@@ -49,6 +49,20 @@
   .btn-action { background: linear-gradient(135deg, var(--accent), #1d4ed8); color: #fff; width: 100%; margin-top: 20px; text-shadow: 0 1px 2px rgba(0,0,0,0.3); }
   .btn-action:disabled { opacity: 0.6; cursor: not-allowed; }
   .btn-outline-soft { background: transparent; border: 1px solid var(--border); color: var(--text-soft); font-size: 0.8rem; }
+  .btn-outline-soft:hover { border-color: rgba(34,211,238,0.55); color: var(--accent); }
+
+  .btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-soft);
+    font-size: 0.8rem;
+    border-radius: 999px;
+    padding: 12px 24px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .muted { color: var(--text-soft); font-size: 0.85rem; margin-top: 8px; }
   
   .log-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 15px; }
   .log-table th { text-align: left; color: var(--text-soft); padding: 12px 8px; border-bottom: 2px solid var(--border); }
@@ -56,6 +70,15 @@
   
   .tag { font-size: 0.75rem; padding: 8px 14px; border-radius: 999px; background: rgba(0,0,0,0.4); border: 1px solid #444; color: #fff; margin: 4px; display: inline-flex; align-items: center; gap: 8px; }
   .tag-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+  .error-banner {
+    border: 1px solid rgba(249,115,115,0.35);
+    background: rgba(249,115,115,0.12);
+    padding: 12px 14px;
+    border-radius: 12px;
+    color: var(--text);
+    margin-bottom: 18px;
+  }
   
   .modal-overlay { position: fixed; inset: 0; background: rgba(2, 8, 23, 0.98); z-index: 10000; display: flex; align-items: center; justify-content: center; }
   .hidden { display: none !important; }
@@ -75,6 +98,10 @@
 
   <div class="shell">
     <div class="glass-panel">
+
+      <!-- Only shows if device mapping fails (so we never silently break again) -->
+      <div id="fatalBanner" class="error-banner hidden"></div>
+
       <header>
         <div class="header-left">
           <div class="reef-icon"><div class="reef-icon-wave"></div></div>
@@ -83,11 +110,22 @@
             <div class="pill">300 Gallon System</div>
           </div>
         </div>
-        <div style="display: flex; gap: 12px;">
+        <div style="display: flex; gap: 12px; flex-wrap:wrap; justify-content:flex-end;">
           <button id="openCalibrationBtn" class="btn-outline-soft" style="border-color: var(--accent); color: var(--accent);">Pump Calibration</button>
           <button id="logoutBtn" class="btn-outline-soft" style="color:var(--danger); border-color: rgba(249,115,115,0.3);">Logout</button>
         </div>
       </header>
+
+      <!-- Minimal: deviceId + online + firmware -->
+      <div class="card" style="margin-bottom: 25px;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:flex-end;">
+          <div id="deviceIdPill" class="tag" style="margin:0;">Device: —</div>
+          <div id="liveStatusPill" class="tag" style="margin:0;">
+            <div class="tag-dot" style="background:#f97373; box-shadow: 0 0 10px rgba(249,115,115,0.7);"></div>Offline
+          </div>
+          <div id="firmwareInfo" class="tag" style="margin:0;">FW: --</div>
+        </div>
+      </div>
 
       <div class="grid">
         <div class="card">
@@ -105,8 +143,7 @@
 
         <div class="card">
           <h3 style="color:var(--accent); margin-top:0;">Active Dosing Plan</h3>
-          <div id="dosingContainer" style="display: flex; flex-direction: column; gap: 10px;">
-          </div>
+          <div id="dosingContainer" style="display: flex; flex-direction: column; gap: 10px;"></div>
           <p style="font-size: 0.75rem; color: var(--text-soft); margin-top: 25px; line-height: 1.5;">
             Calculated volumes are automatically spread across 24 dosing windows based on your reef's consumption.
           </p>
@@ -114,18 +151,18 @@
       </div>
 
       <div class="card" style="margin-bottom: 25px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-          <h3 style="color:var(--accent); margin:0;">Device & Firmware</h3>
-          <div style="display: flex; gap: 8px;">
-            <div id="liveStatusPill" class="tag" style="margin:0;"><div class="tag-dot" style="background:gray;"></div>Offline</div>
-            <div id="firmwareInfo" class="tag" style="margin:0;">FW: --</div>
-          </div>
-        </div>
-        <div style="background: rgba(0,0,0,0.3); padding: 20px; border-radius: 12px; display: flex; gap: 15px; align-items: center;">
-          <input type="file" id="otaFile" accept=".bin" style="margin:0; border:none; background:transparent; font-size:0.8rem; flex:1;">
+        <h3 style="color:var(--accent); margin-top:0;">Firmware OTA</h3>
+
+        <div style="background: rgba(0,0,0,0.3); padding: 20px; border-radius: 12px; display: flex; gap: 15px; align-items: center; flex-wrap:wrap;">
+          <input type="file" id="otaFile" accept=".bin" style="margin:0; border:none; background:transparent; font-size:0.8rem; flex:1; min-width:220px;">
           <button id="otaUploadBtn" class="btn-outline-soft" style="border-color: var(--accent); color: var(--accent);">Flash ESP32</button>
         </div>
         <div id="otaStatus" style="font-size:0.75rem; margin-top:10px; text-align:center; color: var(--accent); font-weight: 500;"></div>
+
+        <div style="margin-top:12px;">
+          <button class="btn" id="enablePushBtn">Enable iPhone Notifications</button>
+          <div class="muted" id="pushStatus">Push: not enabled</div>
+        </div>
       </div>
 
       <div class="card" style="margin-bottom: 25px;">
@@ -145,13 +182,12 @@
 
   <div id="calibrationOverlay" class="hidden modal-overlay">
     <div class="glass-panel" style="width:90%; max-width:900px; max-height:90vh; overflow-y:auto;">
-      <div style="display:flex; justify-content:space-between; margin-bottom:25px; align-items: center;">
+      <div style="display:flex; justify-content:space-between; margin-bottom:25px; align-items: center; gap:12px; flex-wrap:wrap;">
         <h2 style="margin:0;">Pump Calibration</h2>
         <div id="calibrationAck" style="font-size:12px;color:var(--text-soft);margin-top:6px;"></div>
         <button id="closeCalibrationBtn" class="btn-outline-soft" style="background:var(--danger); color:white; border:none; padding: 10px 20px;">Close</button>
       </div>
-      <div class="grid" id="calGrid">
-      </div>
+      <div class="grid" id="calGrid"></div>
     </div>
   </div>
 
@@ -159,6 +195,7 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js"></script>
 
   <script>
     const firebaseConfig = {
@@ -174,31 +211,108 @@
     firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth();
     const db = firebase.database();
+
     let activeDeviceId = null;
     let paramsChart = null;
 
+    const unsubscribers = [];
+    function unsubscribeAll() {
+      while (unsubscribers.length) {
+        try { unsubscribers.pop()(); } catch(e) {}
+      }
+    }
+    function onRef(ref, event, handler) {
+      ref.on(event, handler);
+      unsubscribers.push(() => ref.off(event, handler));
+    }
+
+    function showFatal(msg) {
+      const el = document.getElementById('fatalBanner');
+      el.innerText = msg;
+      el.classList.remove('hidden');
+    }
+    function clearFatal() {
+      const el = document.getElementById('fatalBanner');
+      el.classList.add('hidden');
+      el.innerText = "";
+    }
+
     document.getElementById('loginButton').onclick = () => {
-      auth.signInWithEmailAndPassword(document.getElementById('loginEmail').value, document.getElementById('loginPassword').value)
-        .catch(e => document.getElementById('loginError').innerText = e.message);
+      auth.signInWithEmailAndPassword(
+        document.getElementById('loginEmail').value,
+        document.getElementById('loginPassword').value
+      ).catch(e => document.getElementById('loginError').innerText = e.message);
     };
     document.getElementById('logoutBtn').onclick = () => auth.signOut();
+
+    function setStatusPill(online) {
+      const pill = document.getElementById('liveStatusPill');
+      pill.innerHTML = online
+        ? '<div class="tag-dot" style="background:#4ade80; box-shadow: 0 0 10px rgba(74,222,128,0.7);"></div>Online'
+        : '<div class="tag-dot" style="background:#f97373; box-shadow: 0 0 10px rgba(249,115,115,0.7);"></div>Offline';
+    }
+
+    function setDevicePill(deviceId) {
+      document.getElementById('deviceIdPill').innerText = "Device: " + (deviceId || "—");
+    }
+
+    function switchDevice(newDeviceId) {
+      if (!newDeviceId) {
+        activeDeviceId = null;
+        unsubscribeAll();
+        setDevicePill(null);
+        setStatusPill(false);
+        document.getElementById('firmwareInfo').innerText = "FW: --";
+        document.getElementById('dosingContainer').innerHTML = '';
+        document.getElementById('logBody').innerHTML = '';
+        if (paramsChart) { try { paramsChart.destroy(); } catch(e){} paramsChart = null; }
+        showFatal("No device found for this user. Check users/<uid>/devices mapping and RTDB rules.");
+        return;
+      }
+
+      clearFatal();
+      activeDeviceId = newDeviceId;
+      setDevicePill(activeDeviceId);
+      unsubscribeAll();
+      initApp();
+    }
 
     auth.onAuthStateChanged(user => {
       if (user) {
         document.getElementById('loginModal').classList.add('hidden');
-        db.ref(`users/${user.uid}/devices`).once('value', snap => {
-          if(snap.exists()){
-            activeDeviceId = Object.keys(snap.val())[0];
-            initApp();
+        document.getElementById('loginError').innerText = "";
+        clearFatal();
+        setDevicePill(null);
+        setStatusPill(false);
+
+        // Auto-pick first device in the user's mapping.
+        const ref = db.ref(`users/${user.uid}/devices`);
+        onRef(ref, 'value', snap => {
+          const devicesObj = snap.val() || {};
+          const keys = Object.keys(devicesObj);
+          if (!keys.length) {
+            switchDevice(null);
+            return;
           }
+          // if current is still valid keep it, else pick first
+          const chosen = (activeDeviceId && devicesObj[activeDeviceId]) ? activeDeviceId : keys[0];
+          switchDevice(chosen);
         });
+
       } else {
+        unsubscribeAll();
+        activeDeviceId = null;
         document.getElementById('loginModal').classList.remove('hidden');
+        setDevicePill(null);
+        setStatusPill(false);
       }
     });
 
     function initApp() {
-      db.ref(`devices/${activeDeviceId}/dosingPlan`).on('value', s => {
+      if (!activeDeviceId) return;
+
+      const planRef = db.ref(`devices/${activeDeviceId}/dosingPlan`);
+      onRef(planRef, 'value', s => {
         const plan = s.val() || {};
         const cont = document.getElementById('dosingContainer');
         cont.innerHTML = '';
@@ -207,16 +321,17 @@
         });
       });
 
-      db.ref(`devices/${activeDeviceId}/state`).on('value', s => {
+      const stateRef = db.ref(`devices/${activeDeviceId}/state`);
+      onRef(stateRef, 'value', s => {
         const st = s.val() || {};
-        const pill = document.getElementById('liveStatusPill');
-        pill.innerHTML = st.online ? '<div class="tag-dot" style="background:#4ade80"></div>Online' : '<div class="tag-dot" style="background:gray"></div>Offline';
-        document.getElementById('firmwareInfo').innerText = "FW: " + (st.fwVersion || "1.0.0");
+        setStatusPill(!!st.online);
+        document.getElementById('firmwareInfo').innerText = "FW: " + (st.fwVersion || "--");
       });
 
-      db.ref(`devices/${activeDeviceId}/tests`).on('value', s => {
+      const testsRef = db.ref(`devices/${activeDeviceId}/tests`);
+      onRef(testsRef, 'value', s => {
         const data = s.val() || {};
-        const sorted = Object.values(data).sort((a,b) => a.timestamp - b.timestamp);
+        const sorted = Object.values(data).filter(x => x && x.timestamp).sort((a,b) => a.timestamp - b.timestamp);
         updateChart(sorted);
         updateTable(sorted);
       });
@@ -224,47 +339,50 @@
       setupCalibrationUI();
     }
 
-    // RESTORED: TRiggers OTA by notifying RTDB of the local selection
-    document.getElementById('otaUploadBtn').onclick = function() {
-      const fileInput = document.getElementById('otaFile');
-      if(fileInput.files.length === 0) return alert("Please select a .bin file from your local directory.");
-      
-      const fileName = fileInput.files[0].name;
-      const status = document.getElementById('otaStatus');
-      status.innerText = "Triggering OTA for: " + fileName;
+document.getElementById('otaUploadBtn').onclick = function() {
+  if (!activeDeviceId) return alert("No device selected.");
 
-      // Restored the trigger path for the Firebase Hosting local mapping
-      const hostingUrl = "https://aidoser.web.app/" + fileName;
+  // You can still pick a local file if you want, but we won't depend on its name.
+  const fileInput = document.getElementById('otaFile');
+  if (fileInput.files.length === 0) return alert("Please select a .bin file.");
 
-      db.ref(`devices/${activeDeviceId}/otaRequest`).set({ 
-        url: hostingUrl, 
-        requestedAt: firebase.database.ServerValue.TIMESTAMP 
-      }).then(() => {
-        status.innerText = "OTA Request Sent. ESP32 is pulling from Hosting.";
-      }).catch(err => {
-        status.innerText = "Error: " + err.message;
-      });
-    };
+  const status = document.getElementById('otaStatus');
+  status.innerText = "Triggering OTA...";
 
+  // ✅ Always point the ESP32 at the known-good hosted path
+  const hostingUrl = `https://aidoser.web.app/devices/${activeDeviceId}/firmware.bin`;
+
+db.ref(`devices/${activeDeviceId}/otaRequest`).set({
+  trigger: true,
+  url: hostingUrl,
+  fileName: "firmware.bin",
+  requestedAt: firebase.database.ServerValue.TIMESTAMP
+  }).then(() => {
+    status.innerText = "OTA Request Sent. ESP32 will pull: " + hostingUrl;
+  }).catch(err => {
+    status.innerText = "Error: " + err.message;
+  });
+};
     function updateChart(tests) {
-      if (paramsChart) paramsChart.destroy();
+      if (paramsChart) { try { paramsChart.destroy(); } catch(e){} }
       const ctx = document.getElementById('paramsChart').getContext('2d');
       paramsChart = new Chart(ctx, {
         type: 'line',
         data: {
           labels: tests.map(t => new Date(t.timestamp).toLocaleDateString()),
           datasets: [
-            { label: 'Alk (dKH)', data: tests.map(t => t.alk), tension: 0.3, yAxisID: 'yAlk' },
-            { label: 'Ca (ppm)',  data: tests.map(t => t.ca),  tension: 0.3, yAxisID: 'yPpm' },
-            { label: 'Mg (ppm)',  data: tests.map(t => t.mg),  tension: 0.3, yAxisID: 'yPpm' },
-            { label: 'pH',        data: tests.map(t => t.ph),  tension: 0.3, yAxisID: 'yPh'  }
+            { label: 'Alk (dKH)', data: tests.map(t => t.alk), tension: 0.3 },
+            { label: 'Ca (ppm)',  data: tests.map(t => t.ca),  tension: 0.3 },
+            { label: 'Mg (ppm)',  data: tests.map(t => t.mg),  tension: 0.3 },
+            { label: 'pH',        data: tests.map(t => t.ph),  tension: 0.3 }
           ]
         },
         options: {
-          responsive: true, maintainAspectRatio: false,
+          responsive: true,
+          maintainAspectRatio: false,
           scales: {
-            y: { type: 'linear', display: true, position: 'left', grid: { color: 'rgba(255,255,255,0.05)' } },
-            y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false } }
+            y: { grid: { color: 'rgba(255,255,255,0.05)' } },
+            x: { grid: { color: 'rgba(255,255,255,0.05)' } }
           }
         }
       });
@@ -274,7 +392,13 @@
       const body = document.getElementById('logBody');
       body.innerHTML = '';
       [...tests].reverse().forEach(t => {
-        body.innerHTML += `<tr><td>${new Date(t.timestamp).toLocaleDateString()}</td><td>${t.alk}</td><td>${t.ca}</td><td>${t.mg}</td><td>${t.ph}</td></tr>`;
+        body.innerHTML += `<tr>
+          <td>${new Date(t.timestamp).toLocaleDateString()}</td>
+          <td>${t.alk ?? ''}</td>
+          <td>${t.ca ?? ''}</td>
+          <td>${t.mg ?? ''}</td>
+          <td>${t.ph ?? ''}</td>
+        </tr>`;
       });
     }
 
@@ -300,6 +424,7 @@
 
         const startBtn = document.getElementById(`startCal${n}`);
         startBtn.onclick = function() {
+          if (!activeDeviceId) return alert("No device selected.");
           this.disabled = true;
           db.ref(`devices/${activeDeviceId}/commands/calibrate`).set({ trigger:true, pump: n, durationSec: 60, status: "pending", ts: Date.now() });
           
@@ -316,17 +441,15 @@
         };
 
         document.getElementById(`saveCal${n}`).onclick = async () => {
+          if (!activeDeviceId) return alert("No device selected.");
           const statusEl = document.getElementById(`calStatus${n}`);
-          const valRaw = document.getElementById(`calPump${n}Ml`).value;
-          const val = parseFloat(valRaw);
+          const val = parseFloat(document.getElementById(`calPump${n}Ml`).value);
           if(!isFinite(val) || val <= 0) return alert("Measure the output first (enter ml caught).");
-
-          if (!activeDeviceId) return alert("No active device selected.");
 
           statusEl.innerText = "Saving…";
           try {
             await db.ref(`devices/${activeDeviceId}/calibration/pumps/pump${n}`).set({
-              ml_per_min: val,      // 60 seconds test => ml/min
+              ml_per_min: val,
               ml_per_60s: val,
               ts: Date.now()
             });
@@ -340,6 +463,7 @@
 
     document.getElementById('testForm').onsubmit = (e) => {
       e.preventDefault();
+      if (!activeDeviceId) return alert("No device selected.");
       db.ref(`devices/${activeDeviceId}/tests`).push({
         alk: parseFloat(document.getElementById('alk').value),
         ca: parseFloat(document.getElementById('ca').value),
@@ -356,7 +480,6 @@
       const ackEl = document.getElementById('calibrationAck');
       if (!ackEl) return;
 
-      // Detach old
       if (calStatusUnsub) { try { calStatusUnsub(); } catch(e){} calStatusUnsub = null; }
 
       const ref = db.ref(`devices/${activeDeviceId}/calibration/status`);
@@ -384,5 +507,69 @@
       if (calStatusUnsub) { try { calStatusUnsub(); } catch(e){} calStatusUnsub = null; }
     };
   </script>
+
+<script>
+async function enableIphonePush() {
+  const statusEl = document.getElementById("pushStatus");
+  const setStatus = t => statusEl.textContent = t;
+
+  try {
+    if (!activeDeviceId) {
+      alert("No device selected yet.");
+      return;
+    }
+
+    if (!("serviceWorker" in navigator)) {
+      alert("Service workers not supported.");
+      return;
+    }
+
+    setStatus("Registering service worker...");
+    const reg = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+
+    setStatus("Requesting notification permission...");
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      setStatus("Permission denied");
+      return;
+    }
+
+    const VAPID_KEY = "BAyKJV9NRCycwmCmtNLKtGhOZJbe47uHKbfK_WVsMpszIlxVYOG8ptSwgfZCrpFRAuodt6G3hM5NgW_jMWYk-Yg";
+
+    setStatus("Getting push token...");
+    const messaging = firebase.messaging();
+    const token = await messaging.getToken({
+      vapidKey: VAPID_KEY,
+      serviceWorkerRegistration: reg
+    });
+
+    if (!token) {
+      setStatus("No token received");
+      return;
+    }
+
+    const uid = auth.currentUser.uid;
+    const meta = {
+      ts: Date.now(),
+      platform: "ios-pwa",
+      ua: navigator.userAgent
+    };
+
+    await db.ref(`users/${uid}/pushTokens/${token}`).set(meta);
+    await db.ref(`devices/${activeDeviceId}/pushTokens/${token}`).set(meta);
+
+    setStatus("Push enabled ✅");
+    alert("iPhone notifications enabled!");
+  } catch (err) {
+    console.error(err);
+    setStatus("Push error");
+    alert("Push failed: " + err.message);
+  }
+}
+
+document
+  .getElementById("enablePushBtn")
+  .addEventListener("click", enableIphonePush);
+</script>
 </body>
 </html>
