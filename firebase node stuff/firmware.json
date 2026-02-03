@@ -1,0 +1,7 @@
+{
+  "version": "1.0.3",
+  "build": "2026-02-02.01",
+  "url": "https://aidoser.web.app/devices/reefDoser6/firmware.bin",
+  "sha256": "OPTIONAL_HASH",
+  "notes": "Fixes OTA UI + liveDose logging"
+}

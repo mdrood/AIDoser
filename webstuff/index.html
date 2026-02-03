@@ -155,6 +155,21 @@
   .hidden { display: none !important; }
 
   code { background: rgba(0,0,0,0.35); padding: 2px 6px; border-radius: 8px; }
+
+/* ---- Active Plan + Schedule side-by-side ---- */
+.plan-grid{
+  grid-column: 1 / -1;
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:16px;
+  align-items:stretch;
+}
+.plan-grid .card{height:100%;}
+@media (max-width: 900px){
+  .plan-grid{
+  grid-column: 1 / -1;grid-template-columns:1fr;}
+}
+
 </style>
 </head>
 
@@ -239,15 +254,60 @@
             <span class="pill" id="liveDoseStatus" style="border-color: rgba(56,189,248,0.35); color: var(--text-soft);">—</span>
           </div>
         </div>
-          <div class="muted" id="liveDoseLast" style="margin-top:6px;">Last: —</div>
 
-        <div class="card">
+<div class="plan-grid">
+<div class="card">
           <h3 style="color:var(--accent); margin-top:0;">Active Dosing Plan</h3>
           <div id="dosingContainer" style="display:flex; flex-direction: column; gap: 10px;"></div>
           <p style="font-size: 0.75rem; color: var(--text-soft); margin-top: 25px; line-height: 1.5;">
             Calculated volumes are automatically spread across 24 dosing windows based on your reef's consumption.
           </p>
         </div>
+<div class="card">
+          <h3 style="color:var(--accent); margin-top:0;">Dosing Schedule</h3>
+          <div class="muted">
+            Choose when the ESP32 is allowed to dose and how often. The ESP32 will automatically split each pump's <b>ml/day</b>
+            across the dosing intervals inside the window.
+          </div>
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px;">
+            <div>
+              <label>Start hour</label>
+              <select id="schedStart"></select>
+            </div>
+            <div>
+              <label>End hour</label>
+              <select id="schedEnd"></select>
+            </div>
+            <div>
+              <label>Interval</label>
+              <select id="schedEvery">
+                <option value="15">Every 15 minutes</option>
+                <option value="60">Every 1 hour</option>
+                <option value="120">Every 2 hours</option>
+                <option value="240">Every 4 hours</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display:flex; gap: 10px; align-items:center; flex-wrap:wrap; margin-top: 14px;">
+            <button id="schedSaveBtn" class="btn-action">Save Schedule</button>
+            <span class="pill" id="schedStatus" style="border-color: rgba(56,189,248,0.35); color: var(--text-soft);">—</span>
+          </div>
+
+          <div class="muted" style="margin-top:10px;">
+            Saved to <code>devices/&lt;deviceId&gt;/settings/doseSchedule</code> as:
+            <code>{ startHour, endHour, everyMin }</code>.
+          </div>
+        </div>
+</div>
+
+
+          <div class="muted" id="liveDoseLast" style="margin-top:6px;">Last: —</div>
+
+        
+
+        
 
       </div>
 
@@ -339,7 +399,10 @@
         </div>
       </div>
 
-      <div class="card">
+      
+
+
+<div class="card">
         <div style="height:360px;"><canvas id="doseChart"></canvas></div>
 
         <div class="muted" style="margin-top:10px;">
@@ -459,59 +522,36 @@
       });
 
       setupCalibrationUI();
-      setupLiveDoseUI();
-      setupOtaUI();
+      
+      setupScheduleUI();
+setupLiveDoseUI();
     }
 
-    
-    // ---- OTA UI + acknowledgement ----
-    function setupOtaUI() {
-      const statusEl = document.getElementById('otaStatus');
-      const urlEl = document.getElementById('otaUrlText');
-      const btn = document.getElementById('otaUploadBtn');
-      if (!btn) return;
+    // ---- OTA trigger ----
+    document.getElementById('otaUploadBtn').onclick = function() {
+      const fileInput = document.getElementById('otaFile');
+      if (fileInput.files.length === 0) return alert("Please select a .bin file.");
 
-      if (!activeDeviceId) {
-        if (statusEl) statusEl.innerText = "OTA: no device selected.";
-        return;
-      }
+      const fileName = fileInput.files[0].name;
+      const status = document.getElementById('otaStatus');
+      status.innerText = "Triggering OTA for: " + fileName;
 
+      // You’ve been using device-specific hosting paths:
+      // https://aidoser.web.app/devices/<deviceId>/firmware.bin
+      // Keep it consistent with what works for your ESP32:
       const hostingUrl = `https://aidoser.web.app/devices/${activeDeviceId}/firmware.bin`;
-      if (urlEl) urlEl.innerText = hostingUrl;
 
-      // Live status from the ESP32 (it writes devices/<id>/otaStatus)
-      db.ref(`devices/${activeDeviceId}/otaStatus`).on('value', (snap) => {
-        const v = snap.val();
-        if (!statusEl) return;
-        if (!v) return; // keep current text
-        const s = (typeof v === "string") ? v : (v.status || JSON.stringify(v));
-        const ts = (v.updatedAt) ? (" • " + new Date(v.updatedAt).toLocaleTimeString()) : "";
-        statusEl.innerText = "OTA: " + s + ts;
+      db.ref(`devices/${activeDeviceId}/otaRequest`).set({
+  trigger: true,
+  fileName: "firmware.bin",
+  url: hostingUrl,
+  requestedAt: firebase.database.ServerValue.TIMESTAMP
+}).then(() => {
+        status.innerText = "OTA Request Sent. ESP32 will pull from Hosting.";
+      }).catch(err => {
+        status.innerText = "Error: " + err.message;
       });
-
-      btn.onclick = async function() {
-        try {
-          if (!activeDeviceId) return alert("No device selected.");
-          if (statusEl) statusEl.innerText = "OTA: sending request...";
-
-          await db.ref(`devices/${activeDeviceId}/otaRequest`).set({
-            trigger: true,
-            fileName: "firmware.bin",
-            url: hostingUrl,
-            requestedAt: firebase.database.ServerValue.TIMESTAMP
-          });
-
-          if (statusEl) statusEl.innerText = "OTA: requested. Waiting for device...";
-        } catch (err) {
-          if (statusEl) statusEl.innerText = "OTA error: " + (err?.message || err);
-        }
-      };
-    }
-
-
-// ---- OTA trigger ----
-    // (handler is set in setupOtaUI)
-
+    };
 
     // ---- PARAMS CHART ----
     function updateParamsChart(tests) {
@@ -675,6 +715,99 @@ if (lastEl) {
       };
     }
 
+    // ---- DOSING SCHEDULE (UI -> RTDB settings/doseSchedule) ----
+    function hourLabel(h) {
+      const hh = Number(h) % 24;
+      const ampm = hh < 12 ? "AM" : "PM";
+      const h12 = (hh % 12) === 0 ? 12 : (hh % 12);
+      return `${h12}:00 ${ampm}`;
+    }
+
+    function fillHourSelect(sel) {
+      if (!sel) return;
+      sel.innerHTML = "";
+      for (let h = 0; h < 24; h++) {
+        const opt = document.createElement("option");
+        opt.value = String(h);
+        opt.textContent = hourLabel(h);
+        sel.appendChild(opt);
+      }
+    }
+
+    function setupScheduleUI() {
+      const startSel = document.getElementById("schedStart");
+      const endSel   = document.getElementById("schedEnd");
+      const everySel = document.getElementById("schedEvery");
+      const saveBtn  = document.getElementById("schedSaveBtn");
+      const statusEl = document.getElementById("schedStatus");
+
+      if (!startSel || !endSel || !everySel || !saveBtn) return;
+
+      fillHourSelect(startSel);
+      fillHourSelect(endSel);
+
+      const setStatus = (text, tone) => {
+        if (!statusEl) return;
+        statusEl.innerText = text || "—";
+        if (tone === "ok") {
+          statusEl.style.borderColor = "rgba(74,222,128,0.55)";
+          statusEl.style.color = "#bbf7d0";
+        } else if (tone === "bad") {
+          statusEl.style.borderColor = "rgba(249,115,115,0.55)";
+          statusEl.style.color = "#fecaca";
+        } else {
+          statusEl.style.borderColor = "rgba(56,189,248,0.35)";
+          statusEl.style.color = "var(--text-soft)";
+        }
+      };
+
+      // Live-load current schedule
+      const ref = db.ref(`devices/${activeDeviceId}/settings/doseSchedule`);
+      ref.off();
+      ref.on("value", snap => {
+        const v = snap.val() || {};
+        const startHour = (v.startHour ?? 0);
+        const endHour   = (v.endHour   ?? 24); // allow 24 meaning midnight/end-of-day
+        const everyMin  = (v.everyMin  ?? 60);
+
+        // endHour might be 24; map to 0 in UI label, but keep 24 in DB if user selects midnight end.
+        startSel.value = String(Number(startHour) % 24);
+        endSel.value   = String(Number(endHour) % 24);
+        everySel.value = String(Number(everyMin));
+
+        // Nice summary
+        setStatus(`Loaded: ${hourLabel(startSel.value)} → ${hourLabel(endSel.value)} • every ${everySel.value}m`, "info");
+      });
+
+      // Save
+      saveBtn.onclick = async () => {
+        try {
+          saveBtn.disabled = true;
+          setStatus("Saving…", "info");
+
+          const startHour = Number(startSel.value);
+          const endHour   = Number(endSel.value);
+          const everyMin  = Number(everySel.value);
+
+          if (!isFinite(startHour) || startHour < 0 || startHour > 23) return setStatus("Start hour invalid", "bad");
+          if (!isFinite(endHour)   || endHour   < 0 || endHour   > 23) return setStatus("End hour invalid", "bad");
+          if (![15,60,120,240].includes(everyMin)) return setStatus("Interval invalid", "bad");
+
+          await db.ref(`devices/${activeDeviceId}/settings/doseSchedule`).set({
+            startHour,
+            endHour,
+            everyMin,
+            updatedAt: firebase.database.ServerValue.TIMESTAMP
+          });
+
+          setStatus("✅ Saved. ESP32 will apply within a few seconds.", "ok");
+        } catch (e) {
+          setStatus("Error: " + (e.message || e), "bad");
+        } finally {
+          saveBtn.disabled = false;
+        }
+      };
+    }
 
     function setupCalibrationUI() {
       const names = ["Kalkwasser (P1)", "All-For-Reef (P2)", "Magnesium (P3)", "Auxiliary (P4)"];

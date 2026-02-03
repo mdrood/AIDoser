@@ -51,7 +51,7 @@ const int   DST_OFFSET_SEC = 3600;       // DST +1h (simple)
 
 const char* FIREBASE_DB_URL = "https://aidoser-default-rtdb.firebaseio.com";
 const char* DEVICE_ID       = "reefDoser6";   // 👈 must match your DB path
-const char* FW_VERSION      = "1.0.3-esp32";  // 👈 bump when you flash new firmware
+const char* FW_VERSION      = "1.0.4-esp32";  // 👈 bump when you flash new firmware
 
 WiFiClientSecure secureClient;
 
@@ -404,6 +404,89 @@ float       SEC_PER_DOSE_AUX   = 0.0f;
 float SEC_PER_DOSE_KALK = 0.0f;
 float SEC_PER_DOSE_AFR  = 0.0f;
 float SEC_PER_DOSE_MG   = 0.0f;
+
+// ===================== DOSE WINDOW SCHEDULE (UI-driven) =====================
+// UI writes: /devices/<id>/settings/doseSchedule = { startHour, endHour, everyMin }
+//
+// If a valid doseSchedule exists, we will dose ONLY inside that window and at that interval,
+// splitting each pump's ml/day evenly across the number of intervals in the window.
+//
+// startHour: 0..23
+// endHour:   0..23  (if endHour == startHour => treat as 24h window)
+// everyMin:  15, 60, 120, 240
+struct DoseSchedule {
+  int startHour = 0;
+  int endHour   = 0;
+  int everyMin  = 60;
+  bool enabled  = false;
+  uint64_t updatedAt = 0;
+};
+DoseSchedule gSchedule;
+
+// Persist last scheduled slot executed so we don't "catch up" after reboot.
+int  lastSchedDay  = -1;   // tm_yday
+int  lastSchedSlot = -1;   // slot index within window
+bool schedPrimed   = false;
+
+static inline bool scheduleEveryMinValid(int m) {
+  return (m == 15 || m == 60 || m == 120 || m == 240);
+}
+
+// Returns window length in minutes (1..1440). If invalid, returns 0.
+static int scheduleWindowMinutes(const DoseSchedule& s) {
+  if (!s.enabled) return 0;
+  if (s.startHour < 0 || s.startHour > 23) return 0;
+  if (s.endHour   < 0 || s.endHour   > 23) return 0;
+  if (!scheduleEveryMinValid(s.everyMin)) return 0;
+
+  // Same start/end means "all day"
+  if (s.startHour == s.endHour) return 1440;
+
+  int deltaH = (s.endHour - s.startHour + 24) % 24;  // 1..23
+  return deltaH * 60;
+}
+
+// Minutes since midnight [0..1439]
+static int nowMinutesOfDay(const tm& t) {
+  return t.tm_hour * 60 + t.tm_min;
+}
+
+// True if now is inside dosing window.
+static bool scheduleInWindow(const DoseSchedule& s, int nowMin) {
+  const int startMin = s.startHour * 60;
+  const int endMin   = s.endHour   * 60;
+
+  if (s.startHour == s.endHour) return true; // all day
+  if (startMin < endMin) {
+    return (nowMin >= startMin && nowMin < endMin);
+  } else {
+    // Wraps over midnight
+    return (nowMin >= startMin || nowMin < endMin);
+  }
+}
+
+// Slot index within window, 0..intervals-1
+static int scheduleSlotIndex(const DoseSchedule& s, int nowMin) {
+  const int winMin = scheduleWindowMinutes(s);
+  if (winMin <= 0) return -1;
+
+  const int startMin = s.startHour * 60;
+  int delta;
+  if (s.startHour == s.endHour) {
+    delta = nowMin; // 0..1439
+  } else if (nowMin >= startMin) {
+    delta = nowMin - startMin;
+  } else {
+    delta = (1440 - startMin) + nowMin; // wrapped
+  }
+  return delta / s.everyMin;
+}
+
+static int scheduleIntervals(const DoseSchedule& s) {
+  const int win = scheduleWindowMinutes(s);
+  if (win <= 0) return 0;
+  return win / s.everyMin; // floor
+}
 
 // Real-time schedule: 3 time slots per day (HH:MM)
 // 9:30 AM, 12:30 PM, 3:30 PM (Central Time)
@@ -1008,6 +1091,76 @@ void maybeDosePumpsRealTime() {
     Serial.println("WARN: getLocalTime failed, skipping dosing.");
     return;
   }
+  // ---- UI-driven schedule window dosing ----
+  if (gSchedule.enabled) {
+    const int winMin = scheduleWindowMinutes(gSchedule);
+    const int intervals = scheduleIntervals(gSchedule);
+    if (winMin > 0 && intervals > 0) {
+      const int nowMin = nowMinutesOfDay(timeinfo);
+
+      // New day? reset slot counter
+      if (timeinfo.tm_yday != lastSchedDay) {
+        lastSchedDay = timeinfo.tm_yday;
+        lastSchedSlot = -1;
+        schedPrimed = false;
+      }
+
+      // Prime: mark current slot as already done so we don't "catch up" after reboot
+      if (!schedPrimed) {
+        lastSchedSlot = scheduleSlotIndex(gSchedule, nowMin);
+        if (lastSchedSlot < -1) lastSchedSlot = -1;
+        schedPrimed = true;
+        Serial.printf("Schedule primed (yday=%d, now=%02d:%02d, slot=%d)\n",
+                      timeinfo.tm_yday, timeinfo.tm_hour, timeinfo.tm_min, lastSchedSlot);
+        // Persist
+        dosingPrefs.begin("dosing", false);
+        dosingPrefs.putInt("sch_day", lastSchedDay);
+        dosingPrefs.putInt("sch_slot", lastSchedSlot);
+        dosingPrefs.end();
+        return; // wait until next interval boundary
+      }
+
+      // Only dose inside window
+      if (!scheduleInWindow(gSchedule, nowMin)) {
+        return;
+      }
+
+      const int slotIdx = scheduleSlotIndex(gSchedule, nowMin);
+      if (slotIdx <= lastSchedSlot) {
+        return; // already did this slot
+      }
+
+      // Compute ml per interval for each pump so full ml/day is delivered over the window
+      const float mlPerIntervalKalk = (dosing.ml_per_day_kalk > 0.0f) ? (dosing.ml_per_day_kalk / intervals) : 0.0f;
+      const float mlPerIntervalAfr  = (dosing.ml_per_day_afr  > 0.0f) ? (dosing.ml_per_day_afr  / intervals) : 0.0f;
+      const float mlPerIntervalMg   = (dosing.ml_per_day_mg   > 0.0f) ? (dosing.ml_per_day_mg   / intervals) : 0.0f;
+
+      Serial.printf("Schedule dose slot %d/%d (window=%dmin every=%dmin)\n",
+                    slotIdx, intervals, winMin, gSchedule.everyMin);
+
+      // Dose & log (source="schedule")
+      if (mlPerIntervalKalk > 0.0f) {
+        doseAndLog(1, "kalk", PIN_PUMP_KALK, mlPerIntervalKalk, FLOW_KALK_ML_PER_MIN, "schedule");
+      }
+      if (mlPerIntervalAfr > 0.0f) {
+        doseAndLog(2, "afr",  PIN_PUMP_AFR,  mlPerIntervalAfr,  FLOW_AFR_ML_PER_MIN,  "schedule");
+      }
+      if (mlPerIntervalMg > 0.0f) {
+        doseAndLog(3, "mg",   PIN_PUMP_MG,   mlPerIntervalMg,   FLOW_MG_ML_PER_MIN,   "schedule");
+      }
+
+      lastSchedSlot = slotIdx;
+
+      dosingPrefs.begin("dosing", false);
+      dosingPrefs.putInt("sch_day", lastSchedDay);
+      dosingPrefs.putInt("sch_slot", lastSchedSlot);
+      dosingPrefs.end();
+
+      return; // IMPORTANT: do not fall through to hardcoded slots
+    }
+  }
+
+
   if (!isTimeValid(timeinfo)) {
     Serial.println("WARN: time not valid yet (waiting for NTP); skipping dosing.");
     return;
@@ -1091,6 +1244,58 @@ int dayOfYear = timeinfo.tm_yday;   // 0..365
   }
 }
 
+
+// ===================== FIREBASE: Dose Schedule (settings/doseSchedule) =====================
+// Pull /devices/{DEVICE_ID}/settings/doseSchedule
+// Example: {"startHour":0,"endHour":9,"everyMin":15,"updatedAt":123}
+void firebaseSyncDoseScheduleOnce() {
+  const String path = "/devices/" + String(DEVICE_ID) + "/settings/doseSchedule";
+  String payload = firebaseGetJson(path);
+  if (payload.length() == 0 || payload == "null") {
+    // No schedule configured -> keep disabled (but don't spam logs)
+    gSchedule.enabled = false;
+    return;
+  }
+
+  StaticJsonDocument<256> doc;
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    Serial.println("DoseSchedule: JSON parse error, ignoring");
+    return;
+  }
+
+  // We accept schedule even if updatedAt missing; compare fields to detect changes.
+  int startHour = doc["startHour"] | gSchedule.startHour;
+  int endHour   = doc["endHour"]   | gSchedule.endHour;
+  int everyMin  = doc["everyMin"]  | gSchedule.everyMin;
+  uint64_t updatedAt = doc["updatedAt"] | 0ULL;
+
+  bool enabled = true;
+  if (startHour < 0 || startHour > 23) enabled = false;
+  if (endHour   < 0 || endHour   > 23) enabled = false;
+  if (!scheduleEveryMinValid(everyMin)) enabled = false;
+
+  // Detect change
+  bool changed =
+    (gSchedule.enabled != enabled) ||
+    (gSchedule.startHour != startHour) ||
+    (gSchedule.endHour != endHour) ||
+    (gSchedule.everyMin != everyMin);
+
+  gSchedule.startHour = startHour;
+  gSchedule.endHour   = endHour;
+  gSchedule.everyMin  = everyMin;
+  gSchedule.enabled   = enabled;
+  gSchedule.updatedAt = updatedAt;
+
+  if (changed) {
+    Serial.printf("DoseSchedule applied: start=%d end=%d every=%dmin (enabled=%s)\n",
+                  gSchedule.startHour, gSchedule.endHour, gSchedule.everyMin, gSchedule.enabled ? "true" : "false");
+    // Reset prime state so we don't accidentally catch-up on a new schedule
+    schedPrimed = false;
+    lastSchedSlot = -1;
+  }
+}
 
 // ===================== FIREBASE: resetAi COMMAND =====================
 
@@ -1687,6 +1892,14 @@ void setup(){
 
   // Load last saved AI dosing plan from NVS (if any)
   loadDosingFromPrefs();
+
+  // Load schedule progress (prevents catch-up after reboot)
+  if (dosingPrefs.begin("dosing", true)) {
+    lastSchedDay = dosingPrefs.getInt("sch_day", -1);
+    lastSchedSlot = dosingPrefs.getInt("sch_slot", -1);
+    dosingPrefs.end();
+  }
+
   loadFlowFromPrefs();
   // Sanity-check stored flow rates (bad values can cause hour-long pump runs)
 validateFlow("KALK", FLOW_KALK_ML_PER_MIN, 675.0f);
@@ -1784,6 +1997,7 @@ void loop(){
     firebaseCheckAndHandleLiveDose();
     firebaseCheckAndHandleOtaRequest();
     firebaseCheckAndHandleCalibrate();
+    firebaseSyncDoseScheduleOnce();
   }
 
   // Periodically pull calibration values (ml/min) from RTDB (so ESP32 uses what you saved in UI)
