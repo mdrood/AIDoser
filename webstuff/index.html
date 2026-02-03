@@ -6,86 +6,161 @@
 <title>Reef AI Doser</title>
 <style>
   :root {
-    --bg: #020817; 
+    --bg: #020817;
     --bg-card: rgba(15, 23, 42, 0.96);
-    --accent: #22d3ee; 
+    --accent: #22d3ee;
     --accent-soft: rgba(56, 189, 248, 0.18);
-    --accent-strong: #38bdf8; 
-    --text: #e2e8f0; 
+    --accent-strong: #38bdf8;
+    --text: #e2e8f0;
     --text-soft: #94a3b8;
-    --border: rgba(148, 163, 184, 0.35); 
-    --danger: #f97373; 
+    --border: rgba(148, 163, 184, 0.35);
+    --danger: #f97373;
     --success: #4ade80;
   }
+
   * { box-sizing: border-box; }
   body {
-    margin: 0; min-height: 100vh; font-family: system-ui, -apple-system, sans-serif;
+    margin: 0;
+    min-height: 100vh;
+    font-family: system-ui, -apple-system, sans-serif;
     background: radial-gradient(circle at top, #0ea5e9 0, #020617 40%, #020617 100%);
-    color: var(--text); display: flex; justify-content: center; padding: 16px;
+    color: var(--text);
+    display: flex;
+    justify-content: center;
+    padding: 16px;
   }
   .shell { width: 100%; max-width: 1100px; }
-  .glass-panel { background: var(--bg-card); border-radius: 18px; border: 1px solid var(--border); padding: 25px; backdrop-filter: blur(20px); box-shadow: 0 24px 60px rgba(15, 23, 42, 0.9); }
-  
-  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 30px; gap: 12px; }
-  .header-left { display: flex; align-items: center; gap: 15px; }
-  
+  .glass-panel {
+    background: var(--bg-card);
+    border-radius: 18px;
+    border: 1px solid var(--border);
+    padding: 25px;
+    backdrop-filter: blur(20px);
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.9);
+  }
+
+  header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 30px; gap: 12px; }
+  .header-left { display:flex; align-items:center; gap: 15px; }
+
   .reef-icon {
     width: 48px; height: 48px; border-radius: 50%;
     background: radial-gradient(circle at 30% 20%, #e0f2fe, #0ea5e9 40%, #0369a1 70%, #020617 100%);
     box-shadow: 0 0 0 2px rgba(8, 47, 73, 0.8), 0 12px 26px rgba(12, 74, 110, 0.7);
-    display: flex; align-items: center; justify-content: center;
+    display:flex; align-items:center; justify-content:center;
   }
-  .reef-icon-wave { width: 70%; height: 70%; border-radius: 50%; border: 2.5px solid rgba(255,255,255,0.9); border-top-color: transparent; border-left-color: transparent; transform: rotate(25deg); }
-  
-  .pill { font-size: 0.7rem; color: var(--accent); border: 1px solid var(--accent); padding: 3px 10px; border-radius: 999px; display: inline-block; margin-top: 5px; font-weight: 600; }
-  
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 25px; margin-bottom: 25px; }
-  .card { border-radius: 16px; border: 1px solid var(--border); background: rgba(15, 23, 42, 0.8); padding: 22px; position: relative; }
-  
-  label { font-size: 0.75rem; color: var(--text-soft); display: block; margin-top: 12px; font-weight: 500; }
-  input { width: 100%; padding: 12px; border-radius: 10px; background: #000; border: 1px solid #333; color: #fff; margin-top: 6px; font-size: 1rem; }
-  button { cursor: pointer; border-radius: 999px; border: none; padding: 12px 24px; font-weight: bold; transition: all 0.2s; }
-  
-  .btn-action { background: linear-gradient(135deg, var(--accent), #1d4ed8); color: #fff; width: 100%; margin-top: 20px; text-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+  .reef-icon-wave {
+    width: 70%; height: 70%;
+    border-radius: 50%;
+    border: 2.5px solid rgba(255,255,255,0.9);
+    border-top-color: transparent;
+    border-left-color: transparent;
+    transform: rotate(25deg);
+  }
+
+  .pill {
+    font-size: 0.7rem;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 3px 10px;
+    border-radius: 999px;
+    display: inline-block;
+    margin-top: 5px;
+    font-weight: 600;
+  }
+
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 25px; margin-bottom: 25px; }
+  .card {
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    background: rgba(15, 23, 42, 0.8);
+    padding: 22px;
+    position: relative;
+  }
+
+  label { font-size: 0.75rem; color: var(--text-soft); display:block; margin-top: 12px; font-weight: 500; }
+  input {
+    width: 100%;
+    padding: 12px;
+    border-radius: 10px;
+    background: #000;
+    border: 1px solid #333;
+    color: #fff;
+    margin-top: 6px;
+    font-size: 1rem;
+  }
+
+  button { cursor:pointer; border-radius: 999px; border: none; padding: 12px 24px; font-weight:bold; transition: all 0.2s; }
+  .btn-action {
+    background: linear-gradient(135deg, var(--accent), #1d4ed8);
+    color: #fff;
+    width: 100%;
+    margin-top: 20px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  }
   .btn-action:disabled { opacity: 0.6; cursor: not-allowed; }
-  .btn-outline-soft { background: transparent; border: 1px solid var(--border); color: var(--text-soft); font-size: 0.8rem; }
-  .btn-outline-soft:hover { border-color: rgba(34,211,238,0.55); color: var(--accent); }
+
+  .btn-outline-soft {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-soft);
+    font-size: 0.8rem;
+  }
+  .btn-outline-soft:hover { border-color: var(--accent); color: var(--accent); }
 
   .btn {
     background: transparent;
     border: 1px solid var(--border);
     color: var(--text-soft);
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     border-radius: 999px;
-    padding: 12px 24px;
-    font-weight: bold;
-    cursor: pointer;
+    padding: 10px 16px;
+    font-weight: 700;
   }
   .btn:hover { border-color: var(--accent); color: var(--accent); }
   .muted { color: var(--text-soft); font-size: 0.85rem; margin-top: 8px; }
-  
-  .log-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 15px; }
-  .log-table th { text-align: left; color: var(--text-soft); padding: 12px 8px; border-bottom: 2px solid var(--border); }
-  .log-table td { padding: 12px 8px; border-bottom: 1px solid rgba(255,255,255,0.05); }
-  
-  .tag { font-size: 0.75rem; padding: 8px 14px; border-radius: 999px; background: rgba(0,0,0,0.4); border: 1px solid #444; color: #fff; margin: 4px; display: inline-flex; align-items: center; gap: 8px; }
-  .tag-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
 
-  .error-banner {
-    border: 1px solid rgba(249,115,115,0.35);
-    background: rgba(249,115,115,0.12);
-    padding: 12px 14px;
-    border-radius: 12px;
-    color: var(--text);
-    margin-bottom: 18px;
+  .tag {
+    font-size: 0.75rem;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid #444;
+    color: #fff;
+    margin: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
   }
-  
-  .modal-overlay { position: fixed; inset: 0; background: rgba(2, 8, 23, 0.98); z-index: 10000; display: flex; align-items: center; justify-content: center; }
+  .tag-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+  }
+
+  .log-table { width:100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 15px; }
+  .log-table th { text-align:left; color: var(--text-soft); padding: 12px 8px; border-bottom: 2px solid var(--border); }
+  .log-table td { padding: 12px 8px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(2, 8, 23, 0.98);
+    z-index: 10000;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding: 14px;
+  }
   .hidden { display: none !important; }
+
+  code { background: rgba(0,0,0,0.35); padding: 2px 6px; border-radius: 8px; }
 </style>
 </head>
+
 <body>
 
+  <!-- LOGIN MODAL -->
   <div id="loginModal" class="modal-overlay">
     <div class="glass-panel" style="width:360px; text-align:center;">
       <h2 style="color:var(--accent); margin-bottom:25px; font-size: 2rem;">Reef AI</h2>
@@ -99,35 +174,32 @@
   <div class="shell">
     <div class="glass-panel">
 
-      <!-- Only shows if device mapping fails (so we never silently break again) -->
-      <div id="fatalBanner" class="error-banner hidden"></div>
-
       <header>
         <div class="header-left">
           <div class="reef-icon"><div class="reef-icon-wave"></div></div>
           <div>
-            <h1 style="margin:0; font-size: 2rem; letter-spacing: -1px;">Reef<span style="color:var(--accent)">AI</span></h1>
+            <h1 style="margin:0; font-size: 2rem; letter-spacing: -1px;">
+              Reef<span style="color:var(--accent)">AI</span>
+            </h1>
             <div class="pill">300 Gallon System</div>
           </div>
         </div>
-        <div style="display: flex; gap: 12px; flex-wrap:wrap; justify-content:flex-end;">
+
+        <div style="display:flex; gap: 12px; flex-wrap: wrap; justify-content: flex-end;">
+          <button id="openDoseGraphBtn" class="btn-outline-soft" style="border-color: var(--accent); color: var(--accent);">Dosing History</button>
           <button id="openCalibrationBtn" class="btn-outline-soft" style="border-color: var(--accent); color: var(--accent);">Pump Calibration</button>
           <button id="logoutBtn" class="btn-outline-soft" style="color:var(--danger); border-color: rgba(249,115,115,0.3);">Logout</button>
         </div>
       </header>
-
-      <!-- Minimal: deviceId + online + firmware -->
+      <!-- PARAMETER CHART -->
       <div class="card" style="margin-bottom: 25px;">
-        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:flex-end;">
-          <div id="deviceIdPill" class="tag" style="margin:0;">Device: —</div>
-          <div id="liveStatusPill" class="tag" style="margin:0;">
-            <div class="tag-dot" style="background:#f97373; box-shadow: 0 0 10px rgba(249,115,115,0.7);"></div>Offline
-          </div>
-          <div id="firmwareInfo" class="tag" style="margin:0;">FW: --</div>
-        </div>
+        <h3 style="color:var(--accent); margin-top:0;">Parameter Trends</h3>
+        <div style="height:300px;"><canvas id="paramsChart"></canvas></div>
       </div>
 
+
       <div class="grid">
+
         <div class="card">
           <h3 style="color:var(--accent); margin-top:0;">Manual Test Entry</h3>
           <form id="testForm">
@@ -143,21 +215,71 @@
 
         <div class="card">
           <h3 style="color:var(--accent); margin-top:0;">Active Dosing Plan</h3>
-          <div id="dosingContainer" style="display: flex; flex-direction: column; gap: 10px;"></div>
+          <div id="dosingContainer" style="display:flex; flex-direction: column; gap: 10px;"></div>
           <p style="font-size: 0.75rem; color: var(--text-soft); margin-top: 25px; line-height: 1.5;">
             Calculated volumes are automatically spread across 24 dosing windows based on your reef's consumption.
           </p>
         </div>
+
       </div>
 
+      <!-- DEVICE & OTA -->
       <div class="card" style="margin-bottom: 25px;">
-        <h3 style="color:var(--accent); margin-top:0;">Firmware OTA</h3>
-
-        <div style="background: rgba(0,0,0,0.3); padding: 20px; border-radius: 12px; display: flex; gap: 15px; align-items: center; flex-wrap:wrap;">
-          <input type="file" id="otaFile" accept=".bin" style="margin:0; border:none; background:transparent; font-size:0.8rem; flex:1; min-width:220px;">
-          <button id="otaUploadBtn" class="btn-outline-soft" style="border-color: var(--accent); color: var(--accent);">Flash ESP32</button>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px; gap: 10px; flex-wrap: wrap;">
+          <h3 style="color:var(--accent); margin:0;">Device & Firmware</h3>
+          <div style="display:flex; gap: 8px; flex-wrap: wrap; justify-content:flex-end;">
+            <div id="deviceIdPill" class="tag" style="margin:0;">Device: —</div>
+            <div id="liveStatusPill" class="tag" style="margin:0;">
+              <div class="tag-dot" style="background:#f97373; box-shadow: 0 0 10px rgba(249,115,115,0.7);"></div>Offline
+            </div>
+            <div id="firmwareInfo" class="tag" style="margin:0;">FW: --</div>
+          </div>
         </div>
-        <div id="otaStatus" style="font-size:0.75rem; margin-top:10px; text-align:center; color: var(--accent); font-weight: 500;"></div>
+
+<div style="background: rgba(0,0,0,0.3); padding: 20px; border-radius: 12px; display:flex; gap: 15px; align-items:center;">
+  <div style="flex:1; font-size:0.8rem; color:var(--text-soft);">
+    OTA source:
+    <span id="otaUrlText" style="color:var(--accent); font-weight:700;"></span>
+  </div>
+  <button id="otaUploadBtn" class="btn-outline-soft" style="border-color: var(--accent); color: var(--accent);">
+    Flash ESP32
+  </button>
+</div>
+<div id="otaStatus" style="font-size:0.75rem; margin-top:10px; text-align:center; color: var(--accent); font-weight: 600;"></div>
+
+<!-- LIVE DOSE (RTDB commands/liveDose) -->
+<div style="margin-top:14px; background: rgba(0,0,0,0.25); padding: 16px; border-radius: 12px;">
+  <div style="display:flex; justify-content:space-between; align-items:center; gap: 12px; flex-wrap: wrap;">
+    <div style="font-weight:800; color: var(--accent);">Live Dose</div>
+    <div class="muted" id="liveDoseAck" style="font-size:12px;">Waiting…</div>
+  </div>
+
+  <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top:12px;">
+    <div>
+      <label>Pump</label>
+      <select id="liveDosePump" style="width:100%; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: rgba(2,8,23,0.55); color: var(--text);">
+        <option value="1">1 — Kalk</option>
+        <option value="2">2 — AFR</option>
+        <option value="3">3 — Mg</option>
+        <option value="4">4 — Aux</option>
+      </select>
+    </div>
+    <div>
+      <label>mL</label>
+      <input id="liveDoseMl" type="number" step="0.1" min="0" placeholder="eg. 10" />
+    </div>
+    <div style="display:flex; align-items:flex-end;">
+      <button id="sendLiveDoseBtn" class="btn-action" style="width:100%;">Run Live Dose</button>
+    </div>
+  </div>
+
+  <div class="muted" style="margin-top:10px;">
+    Writes to <code>devices/&lt;deviceId&gt;/commands/liveDose</code> and waits for <code>commands/liveDoseResult</code>.
+  </div>
+</div>
+
+        <!-- QUICK ACCESS: Dosing History -->
+
 
         <div style="margin-top:12px;">
           <button class="btn" id="enablePushBtn">Enable iPhone Notifications</button>
@@ -165,11 +287,7 @@
         </div>
       </div>
 
-      <div class="card" style="margin-bottom: 25px;">
-        <h3 style="color:var(--accent); margin-top:0;">Parameter Trends</h3>
-        <div style="height:300px;"><canvas id="paramsChart"></canvas></div>
-      </div>
-
+      <!-- TEST LOG -->
       <div class="card">
         <h3 style="color:var(--accent); margin-top:0;">Historical Logs</h3>
         <table class="log-table">
@@ -177,20 +295,72 @@
           <tbody id="logBody"></tbody>
         </table>
       </div>
+
     </div>
   </div>
 
+  <!-- CALIBRATION OVERLAY -->
   <div id="calibrationOverlay" class="hidden modal-overlay">
     <div class="glass-panel" style="width:90%; max-width:900px; max-height:90vh; overflow-y:auto;">
-      <div style="display:flex; justify-content:space-between; margin-bottom:25px; align-items: center; gap:12px; flex-wrap:wrap;">
-        <h2 style="margin:0;">Pump Calibration</h2>
-        <div id="calibrationAck" style="font-size:12px;color:var(--text-soft);margin-top:6px;"></div>
+      <div style="display:flex; justify-content:space-between; margin-bottom:25px; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <div>
+          <h2 style="margin:0;">Pump Calibration</h2>
+          <div id="calibrationAck" class="muted" style="font-size:12px;margin-top:6px;"></div>
+        </div>
         <button id="closeCalibrationBtn" class="btn-outline-soft" style="background:var(--danger); color:white; border:none; padding: 10px 20px;">Close</button>
       </div>
       <div class="grid" id="calGrid"></div>
     </div>
   </div>
 
+  <!-- DOSE GRAPH OVERLAY -->
+  <div id="doseGraphOverlay" class="hidden modal-overlay">
+    <div class="glass-panel" style="width:90%; max-width:1000px; max-height:90vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:18px; flex-wrap: wrap;">
+        <div>
+          <h2 style="margin:0;">Dosing History</h2>
+          <div class="muted" style="margin-top:6px;">
+            Plots <b>ml per run</b> from <code>devices/&lt;deviceId&gt;/doseRuns</code>.
+          </div>
+        </div>
+        <button id="closeDoseGraphBtn" class="btn-outline-soft"
+          style="background:var(--danger); color:white; border:none; padding: 10px 20px;">
+          Close
+        </button>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;">
+        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between;">
+          <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+            <span class="tag" style="margin:0;"><div class="tag-dot"></div>Filter</span>
+            <button class="btn-outline-soft" id="doseTabAll">All</button>
+            <button class="btn-outline-soft" id="doseTabKalk">Kalk</button>
+            <button class="btn-outline-soft" id="doseTabAfr">AFR</button>
+            <button class="btn-outline-soft" id="doseTabMg">Mg</button>
+            <button class="btn-outline-soft" id="doseTabAux">Aux</button>
+          </div>
+          <div class="muted" id="doseGraphMeta" style="margin:0;">Loading…</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="height:360px;"><canvas id="doseChart"></canvas></div>
+
+        <div class="muted" style="margin-top:10px;">
+          Supported log formats:
+          <code>{ pump:"kalk", ml:12.3, ts:... }</code>
+          or <code>{ pump:"kalk", durationSec: 60, ml_per_min: 650, ts:... }</code>
+        </div>
+
+        <table class="log-table" style="margin-top:14px;">
+          <thead><tr><th>Time</th><th>Pump</th><th>ml</th></tr></thead>
+          <tbody id="doseRunsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- LIBS -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
@@ -213,30 +383,16 @@
     const db = firebase.database();
 
     let activeDeviceId = null;
+
+    // charts
     let paramsChart = null;
+    let doseChart = null;
 
-    const unsubscribers = [];
-    function unsubscribeAll() {
-      while (unsubscribers.length) {
-        try { unsubscribers.pop()(); } catch(e) {}
-      }
-    }
-    function onRef(ref, event, handler) {
-      ref.on(event, handler);
-      unsubscribers.push(() => ref.off(event, handler));
-    }
+    // dose runs listener
+    let doseRunsUnsub = null;
+    let doseFilter = "all"; // all | kalk | afr | mg | aux
 
-    function showFatal(msg) {
-      const el = document.getElementById('fatalBanner');
-      el.innerText = msg;
-      el.classList.remove('hidden');
-    }
-    function clearFatal() {
-      const el = document.getElementById('fatalBanner');
-      el.classList.add('hidden');
-      el.innerText = "";
-    }
-
+    // ---- AUTH UI ----
     document.getElementById('loginButton').onclick = () => {
       auth.signInWithEmailAndPassword(
         document.getElementById('loginEmail').value,
@@ -245,74 +401,29 @@
     };
     document.getElementById('logoutBtn').onclick = () => auth.signOut();
 
-    function setStatusPill(online) {
-      const pill = document.getElementById('liveStatusPill');
-      pill.innerHTML = online
-        ? '<div class="tag-dot" style="background:#4ade80; box-shadow: 0 0 10px rgba(74,222,128,0.7);"></div>Online'
-        : '<div class="tag-dot" style="background:#f97373; box-shadow: 0 0 10px rgba(249,115,115,0.7);"></div>Offline';
-    }
-
-    function setDevicePill(deviceId) {
-      document.getElementById('deviceIdPill').innerText = "Device: " + (deviceId || "—");
-    }
-
-    function switchDevice(newDeviceId) {
-      if (!newDeviceId) {
-        activeDeviceId = null;
-        unsubscribeAll();
-        setDevicePill(null);
-        setStatusPill(false);
-        document.getElementById('firmwareInfo').innerText = "FW: --";
-        document.getElementById('dosingContainer').innerHTML = '';
-        document.getElementById('logBody').innerHTML = '';
-        if (paramsChart) { try { paramsChart.destroy(); } catch(e){} paramsChart = null; }
-        showFatal("No device found for this user. Check users/<uid>/devices mapping and RTDB rules.");
-        return;
-      }
-
-      clearFatal();
-      activeDeviceId = newDeviceId;
-      setDevicePill(activeDeviceId);
-      unsubscribeAll();
-      initApp();
-    }
-
     auth.onAuthStateChanged(user => {
       if (user) {
         document.getElementById('loginModal').classList.add('hidden');
-        document.getElementById('loginError').innerText = "";
-        clearFatal();
-        setDevicePill(null);
-        setStatusPill(false);
+        db.ref(`users/${user.uid}/devices`).once('value', snap => {
+          if (snap.exists()) {
+            activeDeviceId = Object.keys(snap.val())[0];
 
-        // Auto-pick first device in the user's mapping.
-        const ref = db.ref(`users/${user.uid}/devices`);
-        onRef(ref, 'value', snap => {
-          const devicesObj = snap.val() || {};
-          const keys = Object.keys(devicesObj);
-          if (!keys.length) {
-            switchDevice(null);
-            return;
+            const devPill = document.getElementById('deviceIdPill');
+            if (devPill) devPill.innerText = "Device: " + activeDeviceId;
+
+            initApp();
           }
-          // if current is still valid keep it, else pick first
-          const chosen = (activeDeviceId && devicesObj[activeDeviceId]) ? activeDeviceId : keys[0];
-          switchDevice(chosen);
         });
-
       } else {
-        unsubscribeAll();
         activeDeviceId = null;
         document.getElementById('loginModal').classList.remove('hidden');
-        setDevicePill(null);
-        setStatusPill(false);
       }
     });
 
     function initApp() {
-      if (!activeDeviceId) return;
-
-      const planRef = db.ref(`devices/${activeDeviceId}/dosingPlan`);
-      onRef(planRef, 'value', s => {
+      attachLiveDoseResultListener();
+      // dosing plan pills
+      db.ref(`devices/${activeDeviceId}/dosingPlan`).on('value', s => {
         const plan = s.val() || {};
         const cont = document.getElementById('dosingContainer');
         cont.innerHTML = '';
@@ -321,92 +432,140 @@
         });
       });
 
-      const stateRef = db.ref(`devices/${activeDeviceId}/state`);
-      onRef(stateRef, 'value', s => {
-        const st = s.val() || {};
-        setStatusPill(!!st.online);
-        document.getElementById('firmwareInfo').innerText = "FW: " + (st.fwVersion || "--");
-      });
+      // live status pills
+      db.ref(`devices/${activeDeviceId}/state`).on('value', (s) => {
+  const st = s.val() || {};
+  const online =
+    st.online === true ||
+    st.online === "true" ||
+    st.online === 1 ||
+    st.online === "1";
 
-      const testsRef = db.ref(`devices/${activeDeviceId}/tests`);
-      onRef(testsRef, 'value', s => {
+  const pill = document.getElementById("liveStatusPill");
+  if (pill) {
+    pill.innerHTML = online
+      ? '<div class="tag-dot" style="background:#4ade80; box-shadow:0 0 10px rgba(74,222,128,.7);"></div>Online'
+      : '<div class="tag-dot" style="background:#f97373; box-shadow:0 0 10px rgba(249,115,115,.7);"></div>Offline';
+  }
+
+  const fw = document.getElementById("firmwareInfo");
+  if (fw) fw.innerText = "FW: " + (st.fwVersion || "--");
+});
+
+      // tests -> chart/table
+      db.ref(`devices/${activeDeviceId}/tests`).on('value', s => {
         const data = s.val() || {};
-        const sorted = Object.values(data).filter(x => x && x.timestamp).sort((a,b) => a.timestamp - b.timestamp);
-        updateChart(sorted);
-        updateTable(sorted);
+        const sorted = Object.values(data).sort((a,b) => (a.timestamp||0) - (b.timestamp||0));
+        updateParamsChart(sorted);
+        updateTestTable(sorted);
       });
 
       setupCalibrationUI();
     }
 
-document.getElementById('otaUploadBtn').onclick = function() {
-  if (!activeDeviceId) return alert("No device selected.");
+    // ---- OTA trigger ----
+    document.getElementById('otaUploadBtn').onclick = function() {
+      const fileInput = document.getElementById('otaFile');
+      if (fileInput.files.length === 0) return alert("Please select a .bin file.");
 
-  // You can still pick a local file if you want, but we won't depend on its name.
-  const fileInput = document.getElementById('otaFile');
-  if (fileInput.files.length === 0) return alert("Please select a .bin file.");
+      const fileName = fileInput.files[0].name;
+      const status = document.getElementById('otaStatus');
+      status.innerText = "Triggering OTA for: " + fileName;
 
-  const status = document.getElementById('otaStatus');
-  status.innerText = "Triggering OTA...";
+      // You’ve been using device-specific hosting paths:
+      // https://aidoser.web.app/devices/<deviceId>/firmware.bin
+      // Keep it consistent with what works for your ESP32:
+      const hostingUrl = `https://aidoser.web.app/devices/${activeDeviceId}/firmware.bin`;
 
-  // ✅ Always point the ESP32 at the known-good hosted path
-  const hostingUrl = `https://aidoser.web.app/devices/${activeDeviceId}/firmware.bin`;
-
-db.ref(`devices/${activeDeviceId}/otaRequest`).set({
-  trigger: true,
-  url: hostingUrl,
-  fileName: "firmware.bin",
-  requestedAt: firebase.database.ServerValue.TIMESTAMP
-  }).then(() => {
-    status.innerText = "OTA Request Sent. ESP32 will pull: " + hostingUrl;
-  }).catch(err => {
-    status.innerText = "Error: " + err.message;
-  });
-};
-    function updateChart(tests) {
-      if (paramsChart) { try { paramsChart.destroy(); } catch(e){} }
-      const ctx = document.getElementById('paramsChart').getContext('2d');
-      paramsChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: tests.map(t => new Date(t.timestamp).toLocaleDateString()),
-          datasets: [
-            { label: 'Alk (dKH)', data: tests.map(t => t.alk), tension: 0.3 },
-            { label: 'Ca (ppm)',  data: tests.map(t => t.ca),  tension: 0.3 },
-            { label: 'Mg (ppm)',  data: tests.map(t => t.mg),  tension: 0.3 },
-            { label: 'pH',        data: tests.map(t => t.ph),  tension: 0.3 }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: { grid: { color: 'rgba(255,255,255,0.05)' } },
-            x: { grid: { color: 'rgba(255,255,255,0.05)' } }
-          }
-        }
+      db.ref(`devices/${activeDeviceId}/otaRequest`).set({
+        fileName: "firmware.bin",
+        url: hostingUrl,
+        requestedAt: firebase.database.ServerValue.TIMESTAMP
+      }).then(() => {
+        status.innerText = "OTA Request Sent. ESP32 will pull from Hosting.";
+      }).catch(err => {
+        status.innerText = "Error: " + err.message;
       });
-    }
+    };
 
-    function updateTable(tests) {
+    // ---- PARAMS CHART ----
+    function updateParamsChart(tests) {
+  if (paramsChart) paramsChart.destroy();
+  const ctx = document.getElementById('paramsChart').getContext('2d');
+
+  paramsChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: tests.map(t => new Date(t.timestamp).toLocaleDateString()),
+      datasets: [
+        // LEFT axis (small numbers)
+        { label: 'Alk (dKH)', data: tests.map(t => t.alk), tension: 0.3, yAxisID: 'ySmall' },
+        { label: 'pH',       data: tests.map(t => t.ph),  tension: 0.3, yAxisID: 'ySmall' },
+
+        // RIGHT axis (big numbers)
+        { label: 'Ca (ppm)', data: tests.map(t => t.ca),  tension: 0.3, yAxisID: 'yBig'   },
+        { label: 'Mg (ppm)', data: tests.map(t => t.mg),  tension: 0.3, yAxisID: 'yBig'   },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        // LEFT: Alk + pH
+        ySmall: {
+          type: 'linear',
+          position: 'left',
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          // Optional: keep this axis sensible for reef numbers
+          suggestedMin: 7.6,
+          suggestedMax: 10.6
+        },
+
+        // RIGHT: Ca + Mg
+        yBig: {
+          type: 'linear',
+          position: 'right',
+          grid: { drawOnChartArea: false },
+          // Optional: keep this axis sensible for reef numbers
+          suggestedMin: 350,
+          suggestedMax: 1600
+        }
+      }
+    }
+  });
+}
+
+    function updateTestTable(tests) {
       const body = document.getElementById('logBody');
       body.innerHTML = '';
       [...tests].reverse().forEach(t => {
         body.innerHTML += `<tr>
           <td>${new Date(t.timestamp).toLocaleDateString()}</td>
-          <td>${t.alk ?? ''}</td>
-          <td>${t.ca ?? ''}</td>
-          <td>${t.mg ?? ''}</td>
-          <td>${t.ph ?? ''}</td>
+          <td>${t.alk}</td><td>${t.ca}</td><td>${t.mg}</td><td>${t.ph}</td>
         </tr>`;
       });
     }
 
+    // ---- TEST ENTRY ----
+    document.getElementById('testForm').onsubmit = (e) => {
+      e.preventDefault();
+      db.ref(`devices/${activeDeviceId}/tests`).push({
+        alk: parseFloat(document.getElementById('alk').value),
+        ca: parseFloat(document.getElementById('ca').value),
+        mg: parseFloat(document.getElementById('mg').value),
+        ph: parseFloat(document.getElementById('ph').value),
+        timestamp: Date.now()
+      });
+      alert("Results synced with Reef AI.");
+    };
+
+    // ---- CALIBRATION ----
     function setupCalibrationUI() {
       const names = ["Kalkwasser (P1)", "All-For-Reef (P2)", "Magnesium (P3)", "Auxiliary (P4)"];
       const grid = document.getElementById('calGrid');
       grid.innerHTML = '';
-      
+
       names.forEach((name, i) => {
         const n = i + 1;
         const card = document.createElement('div');
@@ -416,18 +575,19 @@ db.ref(`devices/${activeDeviceId}/otaRequest`).set({
           <div style="font-size:0.65rem; color:var(--text-soft); margin-bottom:5px;">PUMP ${n}</div>
           <div style="font-weight:bold; margin-bottom:15px; color:var(--accent);">${name}</div>
           <button id="startCal${n}" class="btn-action" style="background:var(--success); margin:0;">Start 60s Test</button>
-          <input id="calPump${n}Ml" type="number" placeholder="ml caught" style="margin: 15px 0; text-align:center;">
-          <button id="saveCal${n}" class="btn-outline-soft" style="width:100%; padding: 12px;">Save ml/min</button>
+          <input id="calPump${n}Ml" type="number" placeholder="ml caught in 60s" style="margin: 15px 0; text-align:center;">
+          <button id="saveCal${n}" class="btn-outline-soft" style="width:100%; padding: 12px;">Save flow (ml/min)</button>
           <div id="calStatus${n}" style="margin-top:10px;font-size:12px;color:var(--text-soft);text-align:center;"></div>
         `;
         grid.appendChild(card);
 
         const startBtn = document.getElementById(`startCal${n}`);
         startBtn.onclick = function() {
-          if (!activeDeviceId) return alert("No device selected.");
           this.disabled = true;
-          db.ref(`devices/${activeDeviceId}/commands/calibrate`).set({ trigger:true, pump: n, durationSec: 60, status: "pending", ts: Date.now() });
-          
+          db.ref(`devices/${activeDeviceId}/commands/calibrate`).set({
+            trigger: true, pump: n, durationSec: 60, status: "pending", ts: Date.now()
+          });
+
           let seconds = 60;
           const timer = setInterval(() => {
             this.innerText = `Running... ${seconds}s`;
@@ -441,38 +601,30 @@ db.ref(`devices/${activeDeviceId}/otaRequest`).set({
         };
 
         document.getElementById(`saveCal${n}`).onclick = async () => {
-          if (!activeDeviceId) return alert("No device selected.");
           const statusEl = document.getElementById(`calStatus${n}`);
-          const val = parseFloat(document.getElementById(`calPump${n}Ml`).value);
-          if(!isFinite(val) || val <= 0) return alert("Measure the output first (enter ml caught).");
+          const mlCaught = parseFloat(document.getElementById(`calPump${n}Ml`).value);
+          const durationSec = 60; // test duration used by Start 60s Test
+          if (!isFinite(mlCaught) || mlCaught <= 0) return alert("Measure output first (enter ml caught).");
 
-          statusEl.innerText = "Saving…";
+          // Normalize to ONE unit everywhere: ml/min
+          const mlPerMin = mlCaught * (60 / durationSec);
+
+          statusEl.innerText = `Saving… (${mlPerMin.toFixed(1)} ml/min)`;
           try {
             await db.ref(`devices/${activeDeviceId}/calibration/pumps/pump${n}`).set({
-              ml_per_min: val,
-              ml_per_60s: val,
+              unit: "ml/min",
+              durationSec: durationSec,
+              ml_caught: mlCaught,
+              ml_per_min: mlPerMin,
               ts: Date.now()
             });
-            statusEl.innerText = "✅ Saved to cloud. Waiting for ESP32 to apply…";
+            statusEl.innerText = `✅ Saved ${mlPerMin.toFixed(1)} ml/min. Waiting for ESP32 to apply…`;
           } catch (err) {
             statusEl.innerText = "❌ Save failed: " + (err?.message || err);
           }
         };
       });
     }
-
-    document.getElementById('testForm').onsubmit = (e) => {
-      e.preventDefault();
-      if (!activeDeviceId) return alert("No device selected.");
-      db.ref(`devices/${activeDeviceId}/tests`).push({
-        alk: parseFloat(document.getElementById('alk').value),
-        ca: parseFloat(document.getElementById('ca').value),
-        mg: parseFloat(document.getElementById('mg').value),
-        ph: parseFloat(document.getElementById('ph').value),
-        timestamp: Date.now()
-      });
-      alert("Results synced with Reef AI.");
-    };
 
     let calStatusUnsub = null;
     function attachCalibrationStatusListener() {
@@ -506,70 +658,250 @@ db.ref(`devices/${activeDeviceId}/otaRequest`).set({
       document.getElementById('calibrationOverlay').classList.add('hidden');
       if (calStatusUnsub) { try { calStatusUnsub(); } catch(e){} calStatusUnsub = null; }
     };
-  </script>
 
-<script>
-async function enableIphonePush() {
-  const statusEl = document.getElementById("pushStatus");
-  const setStatus = t => statusEl.textContent = t;
-
-  try {
-    if (!activeDeviceId) {
-      alert("No device selected yet.");
-      return;
+    // ---- DOSE RUNS / GRAPH (NEW) ----
+    function normalizePump(p) {
+      const s = String(p || "").toLowerCase();
+      if (s.includes("kalk")) return "kalk";
+      if (s.includes("afr") || s.includes("allforreef") || s.includes("all-for-reef")) return "afr";
+      if (s.includes("mg") || s.includes("mag")) return "mg";
+      if (s.includes("aux") || s.includes("pump4") || s.includes("p4")) return "aux";
+      return s || "other";
     }
 
-    if (!("serviceWorker" in navigator)) {
-      alert("Service workers not supported.");
-      return;
+    function computeMlFromRun(run) {
+      // Preferred:
+      if (typeof run.ml === "number") return run.ml;
+      const ml = Number(run.ml);
+      if (isFinite(ml)) return ml;
+
+      // Optional support: duration -> ml
+      const durationSec = Number(run.durationSec || run.duration || 0);
+      const mlPerMin = Number(run.ml_per_min || run.mlPerMin || 0);
+      if (durationSec > 0 && mlPerMin > 0) {
+        return (durationSec / 60) * mlPerMin;
+      }
+      return NaN;
     }
 
-    setStatus("Registering service worker...");
-    const reg = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
-
-    setStatus("Requesting notification permission...");
-    const permission = await Notification.requestPermission();
-    if (permission !== "granted") {
-      setStatus("Permission denied");
-      return;
+    function fmtTs(ts) {
+      const t = Number(ts || 0);
+      if (!t) return "—";
+      return new Date(t).toLocaleString();
     }
 
-    const VAPID_KEY = "BAyKJV9NRCycwmCmtNLKtGhOZJbe47uHKbfK_WVsMpszIlxVYOG8ptSwgfZCrpFRAuodt6G3hM5NgW_jMWYk-Yg";
+    function renderDoseGraph(rows) {
+      const meta = document.getElementById("doseGraphMeta");
+      const tbody = document.getElementById("doseRunsBody");
+      const ctx = document.getElementById("doseChart").getContext("2d");
 
-    setStatus("Getting push token...");
-    const messaging = firebase.messaging();
-    const token = await messaging.getToken({
-      vapidKey: VAPID_KEY,
-      serviceWorkerRegistration: reg
-    });
+      const filtered = rows
+        .filter(r => isFinite(r.ml) && r.ml >= 0)
+        .filter(r => doseFilter === "all" ? true : r.pump === doseFilter)
+        .sort((a,b) => (a.ts||0) - (b.ts||0));
 
-    if (!token) {
-      setStatus("No token received");
-      return;
+      meta.textContent = `${filtered.length} runs shown`;
+
+      // Table (latest 60)
+      tbody.innerHTML = "";
+      [...filtered].reverse().slice(0, 60).forEach(r => {
+        tbody.innerHTML += `<tr>
+          <td>${fmtTs(r.ts)}</td>
+          <td>${r.pump}</td>
+          <td>${r.ml.toFixed(1)}</td>
+        </tr>`;
+      });
+
+      // Chart
+      if (doseChart) doseChart.destroy();
+
+      doseChart = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: filtered.map(r => new Date(r.ts).toLocaleString()),
+          datasets: [{
+            label: "ml per run",
+            data: filtered.map(r => r.ml),
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: { beginAtZero: true }
+          }
+        }
+      });
     }
 
-    const uid = auth.currentUser.uid;
-    const meta = {
-      ts: Date.now(),
-      platform: "ios-pwa",
-      ua: navigator.userAgent
+    function attachDoseRunsListener() {
+      if (!activeDeviceId) return;
+
+      if (doseRunsUnsub) { try { doseRunsUnsub(); } catch(e){} doseRunsUnsub = null; }
+
+      // last N runs is plenty for graph UI; your prune function keeps 365 days anyway.
+      const ref = db.ref(`devices/${activeDeviceId}/doseRuns`).limitToLast(800);
+
+      const handler = (snap) => {
+        const obj = snap.val() || {};
+        const rows = Object.values(obj).map(r => ({
+          pump: normalizePump(r.pump || r.pumpName || r.type || ""),
+          ml: computeMlFromRun(r),
+          ts: Number(r.ts || r.timestamp || 0)
+        })).filter(r => r.ts);
+
+        renderDoseGraph(rows);
+      };
+
+      ref.on("value", handler);
+      doseRunsUnsub = () => ref.off("value", handler);
+    }
+
+    function setDoseFilter(f) {
+      doseFilter = f;
+      attachDoseRunsListener(); // quick refresh
+    }
+
+    document.getElementById("openDoseGraphBtn").onclick = () => {
+      document.getElementById("doseGraphOverlay").classList.remove("hidden");
+      attachDoseRunsListener();
     };
 
-    await db.ref(`users/${uid}/pushTokens/${token}`).set(meta);
-    await db.ref(`devices/${activeDeviceId}/pushTokens/${token}`).set(meta);
+    // Same action button inside the Device card
+    const btn2 = document.getElementById("openDoseGraphBtn2");
+    if (btn2) btn2.onclick = document.getElementById("openDoseGraphBtn").onclick;
 
-    setStatus("Push enabled ✅");
-    alert("iPhone notifications enabled!");
-  } catch (err) {
-    console.error(err);
-    setStatus("Push error");
-    alert("Push failed: " + err.message);
-  }
-}
+    document.getElementById("closeDoseGraphBtn").onclick = () => {
+      document.getElementById("doseGraphOverlay").classList.add("hidden");
+      if (doseRunsUnsub) { try { doseRunsUnsub(); } catch(e){} doseRunsUnsub = null; }
+    };
 
-document
-  .getElementById("enablePushBtn")
-  .addEventListener("click", enableIphonePush);
-</script>
+    document.getElementById("doseTabAll").onclick  = () => setDoseFilter("all");
+    document.getElementById("doseTabKalk").onclick = () => setDoseFilter("kalk");
+    document.getElementById("doseTabAfr").onclick  = () => setDoseFilter("afr");
+    document.getElementById("doseTabMg").onclick   = () => setDoseFilter("mg");
+    document.getElementById("doseTabAux").onclick  = () => setDoseFilter("aux");
+
+
+    // ---- LIVE DOSE (RTDB commands/liveDose) ----
+    let liveDoseResultUnsub = null;
+
+    async function sendLiveDose() {
+      if (!activeDeviceId) {
+        alert("No device selected yet.");
+        return;
+      }
+      const pump = Number(document.getElementById("liveDosePump").value || 0);
+      const ml = Number(document.getElementById("liveDoseMl").value || 0);
+
+      if (!(pump >= 1 && pump <= 4) || !(ml > 0)) {
+        alert("Enter a valid pump (1-4) and ml > 0.");
+        return;
+      }
+
+      const reqId = "live_" + Date.now();
+
+      const cmdRef = db.ref(`devices/${activeDeviceId}/commands/liveDose`);
+      const ackEl = document.getElementById("liveDoseAck");
+      ackEl.textContent = "Sending…";
+
+      await cmdRef.set({
+        trigger: true,
+        status: "pending",
+        reqId,
+        pump,
+        ml,
+        requestedAt: Date.now()
+      });
+
+      ackEl.textContent = `Sent ${ml.toFixed(1)} ml to pump ${pump} (reqId: ${reqId})`;
+    }
+
+    function attachLiveDoseResultListener() {
+      if (!activeDeviceId) return;
+
+      if (liveDoseResultUnsub) { try { liveDoseResultUnsub(); } catch(e){} liveDoseResultUnsub = null; }
+
+      const ref = db.ref(`devices/${activeDeviceId}/commands/liveDoseResult`);
+      const ackEl = document.getElementById("liveDoseAck");
+
+      const handler = (snap) => {
+        const r = snap.val();
+        if (!r) return;
+
+        const status = (r.status || "").toString();
+        const ts = Number(r.ts || 0);
+        const when = ts ? new Date(ts).toLocaleString() : "—";
+        const msg = (r.message || r.pumpName || "").toString();
+
+        if (status === "ok") {
+          ackEl.textContent = `✅ ${when} — OK: ${Number(r.ml||0).toFixed(1)} ml (${msg})`;
+        } else if (status === "error") {
+          ackEl.textContent = `❌ ${when} — ERROR: ${msg || "live dose failed"}`;
+        } else {
+          ackEl.textContent = `ℹ️ ${when} — ${status || "update received"}`;
+        }
+      };
+
+      ref.on("value", handler);
+      liveDoseResultUnsub = () => ref.off("value", handler);
+    }
+
+    const liveBtn = document.getElementById("sendLiveDoseBtn");
+    if (liveBtn) liveBtn.onclick = sendLiveDose;
+
+    // ---- PUSH ENABLE (iPhone PWA) ----
+    async function enableIphonePush() {
+      const statusEl = document.getElementById("pushStatus");
+      const setStatus = t => statusEl.textContent = t;
+
+      try {
+        if (!activeDeviceId) {
+          alert("No device selected yet.");
+          return;
+        }
+        if (!("serviceWorker" in navigator)) {
+          alert("Service workers not supported.");
+          return;
+        }
+
+        setStatus("Registering service worker...");
+        const reg = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+
+        setStatus("Requesting notification permission...");
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") {
+          setStatus("Permission denied");
+          return;
+        }
+
+        const VAPID_KEY = "BAyKJV9NRCycwmCmtNLKtGhOZJbe47uHKbfK_WVsMpszIlxVYOG8ptSwgfZCrpFRAuodt6G3hM5NgW_jMWYk-Yg";
+
+        setStatus("Getting push token...");
+        const messaging = firebase.messaging();
+        const token = await messaging.getToken({ vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
+
+        if (!token) {
+          setStatus("No token received");
+          return;
+        }
+
+        const uid = auth.currentUser.uid;
+        const meta = { ts: Date.now(), platform: "ios-pwa", ua: navigator.userAgent };
+
+        await db.ref(`users/${uid}/pushTokens/${token}`).set(meta);
+        await db.ref(`devices/${activeDeviceId}/pushTokens/${token}`).set(meta);
+
+        setStatus("Push enabled ✅");
+        alert("iPhone notifications enabled!");
+      } catch (err) {
+        console.error(err);
+        document.getElementById("pushStatus").textContent = "Push error";
+        alert("Push failed: " + err.message);
+      }
+    }
+
+    document.getElementById("enablePushBtn").addEventListener("click", enableIphonePush);
+  </script>
 </body>
 </html>

@@ -7,8 +7,13 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <Update.h>
+#include <ArduinoJson.h>
 #include <stdint.h>
 #include <Preferences.h>
+
+// Forward declarations used by helpers
+uint64_t getEpochMillis();
+
 
 // If MAIN_PAGE_HTML is defined in another file, this keeps it linking cleanly:
 // Simple placeholder page – ESP32 is now mainly a backend.
@@ -45,7 +50,7 @@ const int   DST_OFFSET_SEC = 3600;       // DST +1h (simple)
 // ===================== FIREBASE (REST API) =====================
 
 const char* FIREBASE_DB_URL = "https://aidoser-default-rtdb.firebaseio.com";
-const char* DEVICE_ID       = "reefDoser5";   // 👈 must match your DB path
+const char* DEVICE_ID       = "reefDoser6";   // 👈 must match your DB path
 const char* FW_VERSION      = "1.0.0-esp32";  // 👈 bump when you flash new firmware
 
 WiFiClientSecure secureClient;
@@ -140,6 +145,32 @@ bool firebasePostJson(const String& path, const String& jsonBody) {
   https.end();
   return true;
 }
+
+
+// Log a completed dose run to RTDB so the web UI can build the dosing history graph.
+// Writes to: /devices/<DEVICE_ID>/doseRuns (auto-push key).
+bool firebaseLogDoseRun(int pumpIndex,
+                        const String& pumpName,
+                        float ml,
+                        float durationSec,
+                        float flowMlPerMin,
+                        const String& source) {
+  StaticJsonDocument<256> doc;
+  doc["ts"] = (unsigned long long)getEpochMillis();
+  doc["source"] = source;
+  doc["pumpIndex"] = pumpIndex;
+  doc["pump"] = pumpName;
+  doc["ml"] = ml;
+  doc["durationSec"] = durationSec;
+  doc["flowMlPerMin"] = flowMlPerMin;
+
+  String body;
+  serializeJson(doc, body);
+
+  const String path = "/devices/" + String(DEVICE_ID) + "/doseRuns.json";
+  return firebasePostJson(path, body);
+}
+
 
 
 // Simple GET helper (returns body or empty string)
@@ -297,6 +328,18 @@ void loadFlowFromPrefs() {
   Serial.println(FLOW_AUX_ML_PER_MIN);
 }
 
+
+static void validateFlow(const char* name, float &flow, float fallback) {
+  // Reasonable range for typical dosing pumps (ml/min). Adjust if needed.
+  if (!isfinite(flow) || flow < 30.0f || flow > 5000.0f) {
+    Serial.printf("Prefs: %s flow %.2f is invalid. Using fallback %.2f\n", name, flow, fallback);
+    flow = fallback;
+  }
+}
+
+// Forward-declared here; implementation is below dosing schedule globals.
+
+
 void saveFlowToPrefs() {
   if (!dosingPrefs.begin("flow", false)) {
     Serial.println("Prefs: failed to open flow (write)");
@@ -353,6 +396,10 @@ const int DOSES_PER_DAY_KALK = 3;
 const int DOSES_PER_DAY_AFR  = 3;
 const int DOSES_PER_DAY_MG   = 3;
 
+// AUX pump is optional; not part of the daily schedule by default.
+const int   DOSES_PER_DAY_AUX  = 0;
+float       SEC_PER_DOSE_AUX   = 0.0f;
+
 // per-dose run time (seconds)
 float SEC_PER_DOSE_KALK = 0.0f;
 float SEC_PER_DOSE_AFR  = 0.0f;
@@ -367,6 +414,42 @@ int DOSE_MINUTES[DOSE_SLOTS_PER_DAY] = {30, 30, 30};
 // Track whether we've dosed each slot for the current day
 int  lastDoseDay = -1;                        // tm_yday of last day we reset
 bool slotDone[DOSE_SLOTS_PER_DAY] = {false, false, false};
+
+// One-time boot helper: when NTP time becomes valid, mark earlier slots as already-done
+// so the device doesn't "catch up" doses immediately after a reboot.
+bool doseSlotsPrimed = false;
+
+
+// Time validity guard: avoid dosing before NTP sync is real.
+// tm_year is years since 1900. 123 == 2023.
+bool isTimeValid(const tm& t) {
+  return (t.tm_year >= 123);
+}
+
+// On boot/restart, we do NOT want to "catch up" on earlier slots.
+// When time becomes valid, mark any already-passed slots as done.
+void primeDoseSlotsForToday() {
+  struct tm t;
+  if (!getLocalTime(&t)) return;
+  if (!isTimeValid(t)) {
+    Serial.println("Dose prime skipped: time not valid yet (waiting for NTP).");
+    return;
+  }
+
+  const int secNow = t.tm_hour * 3600 + t.tm_min * 60 + t.tm_sec;
+
+  // Mark any slots already in the past as "done"
+  for (int i = 0; i < DOSE_SLOTS_PER_DAY; i++) {
+    const int slotSec = DOSE_HOURS[i] * 3600 + DOSE_MINUTES[i] * 60;
+    if (secNow >= slotSec) slotDone[i] = true;
+  }
+
+  lastDoseDay = t.tm_yday;      // prevent immediate "new day" reset
+  doseSlotsPrimed = true;
+
+  Serial.printf("Dose slots primed for today (yday=%d, now=%02d:%02d:%02d)\n",
+                t.tm_yday, t.tm_hour, t.tm_min, t.tm_sec);
+}
 
 
 // ===================== IFTTT WEBHOOK SETUP =====================
@@ -385,8 +468,12 @@ const char* IFTTT_KEY = "fBplW8jJqqotTqTxck4oTdK_oHTJKAawKfja-WlcgW-";
 //               String value3 = "");
 
 String getLocalTimeString();
+bool isTimeValid(const tm& t);
 
 
+
+void firebaseSendStateHeartbeat();
+void primeDoseSlotsForToday();
 // ===================== HELPERS =====================
 
 uint32_t nowSeconds() {
@@ -879,22 +966,61 @@ void safetyBackoffIfNoTests() {
 
 // ===================== PUMP SCHEDULER (REAL-TIME SLOTS) =====================
 
-void giveDose(int pin, float seconds){
-  if(seconds <= 0) return;
+void giveDose(int pin, float seconds) {
+  if (seconds <= 0) return;
+
+  const uint32_t totalMs = (uint32_t)(seconds * 1000.0f);
+  const uint32_t beatEveryMs = 5000;   // keep RTDB heartbeat fresh while dosing
+  const uint32_t loopDelayMs = 50;     // yield to WiFi stack
+
   digitalWrite(pin, HIGH);
-  delay((unsigned long)(seconds*1000.0f));
+
+  uint32_t start = millis();
+  uint32_t lastBeat = start;
+
+  while ((uint32_t)(millis() - start) < totalMs) {
+    delay(loopDelayMs);
+
+    // Keep the device marked online while a long dose is running
+    if ((uint32_t)(millis() - lastBeat) >= beatEveryMs) {
+      lastBeat = millis();
+      firebaseSendStateHeartbeat();
+    }
+  }
+
   digitalWrite(pin, LOW);
 }
 
-void maybeDosePumpsRealTime(){
+
+// Doses a specific amount on a specific pump, then logs it to RTDB.
+void doseAndLog(int pumpIndex, const String& pumpName, int pin, float ml, float flowMlPerMin, const String& source) {
+  if (ml <= 0.0f || flowMlPerMin <= 0.0f) return;
+  const float durationSec = (ml / flowMlPerMin) * 60.0f;
+  giveDose(pin, durationSec);
+  firebaseLogDoseRun(pumpIndex, pumpName, ml, durationSec, flowMlPerMin, source);
+}
+
+
+void maybeDosePumpsRealTime() {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
     // If we can't get time, don't dose
     Serial.println("WARN: getLocalTime failed, skipping dosing.");
     return;
   }
+  if (!isTimeValid(timeinfo)) {
+    Serial.println("WARN: time not valid yet (waiting for NTP); skipping dosing.");
+    return;
+  }
 
-  int dayOfYear = timeinfo.tm_yday;   // 0..365
+  // One-time boot helper: prevent "catch-up" doses after reboot.
+  if (!doseSlotsPrimed) {
+    primeDoseSlotsForToday();
+    // If still not primed, just wait.
+    if (!doseSlotsPrimed) return;
+  }
+
+int dayOfYear = timeinfo.tm_yday;   // 0..365
   int hour      = timeinfo.tm_hour;   // 0..23
   int minute    = timeinfo.tm_min;    // 0..59
 
@@ -1004,40 +1130,25 @@ bool firebaseCheckAndHandleResetAi() {
 
 // Perform one "live" dose using current per-day plan (one of the 3 doses)
 void runLiveDoseOnce() {
-  float mlPerDoseKalk = (DOSES_PER_DAY_KALK > 0) ? (dosing.ml_per_day_kalk / DOSES_PER_DAY_KALK) : 0.0f;
-  float mlPerDoseAfr  = (DOSES_PER_DAY_AFR  > 0) ? (dosing.ml_per_day_afr  / DOSES_PER_DAY_AFR ) : 0.0f;
-  float mlPerDoseMg   = (DOSES_PER_DAY_MG   > 0) ? (dosing.ml_per_day_mg   / DOSES_PER_DAY_MG  ) : 0.0f;
-
-  String timeStr = getLocalTimeString();
-
   Serial.println("=== LIVE DOSE REQUESTED ===");
 
-  if (SEC_PER_DOSE_KALK > 0.0f && mlPerDoseKalk > 0.0f) {
-    giveDose(PIN_PUMP_KALK, SEC_PER_DOSE_KALK);
-    /*firebasePushAlert("dose",
-                      "LiveDose-Kalk",
-                      String(mlPerDoseKalk, 1) + " ml",
-                      timeStr,
-                      "dose_live",
-                      10ULL*60ULL*1000ULL);*/
+  // This function is used by the web UI "dose now" action (if you keep it),
+  // and it doses one "slot" worth (SEC_PER_DOSE_*) for each pump.
+  if (SEC_PER_DOSE_KALK > 0.0f) {
+    const float ml = (SEC_PER_DOSE_KALK / 60.0f) * FLOW_KALK_ML_PER_MIN;
+    doseAndLog(1, "kalk", PIN_PUMP_KALK, ml, FLOW_KALK_ML_PER_MIN, "slot");
   }
-  if (SEC_PER_DOSE_AFR > 0.0f && mlPerDoseAfr > 0.0f) {
-    giveDose(PIN_PUMP_AFR, SEC_PER_DOSE_AFR);
-    /*firebasePushAlert("dose",
-                      "LiveDose-AFR",
-                      String(mlPerDoseAfr, 1) + " ml",
-                      timeStr,
-                      "dose_live",
-                      10ULL*60ULL*1000ULL);*/
+  if (SEC_PER_DOSE_AFR > 0.0f) {
+    const float ml = (SEC_PER_DOSE_AFR / 60.0f) * FLOW_AFR_ML_PER_MIN;
+    doseAndLog(2, "afr", PIN_PUMP_AFR, ml, FLOW_AFR_ML_PER_MIN, "slot");
   }
-  if (SEC_PER_DOSE_MG > 0.0f && mlPerDoseMg > 0.0f) {
-    giveDose(PIN_PUMP_MG, SEC_PER_DOSE_MG);
-    /*firebasePushAlert("dose",
-                      "LiveDose-Mg",
-                      String(mlPerDoseMg, 1) + " ml",
-                      timeStr,
-                      "dose_live",
-                      10ULL*60ULL*1000ULL);*/
+  if (SEC_PER_DOSE_MG > 0.0f) {
+    const float ml = (SEC_PER_DOSE_MG / 60.0f) * FLOW_MG_ML_PER_MIN;
+    doseAndLog(3, "mg", PIN_PUMP_MG, ml, FLOW_MG_ML_PER_MIN, "slot");
+  }
+  if (SEC_PER_DOSE_AUX > 0.0f) {
+    const float ml = (SEC_PER_DOSE_AUX / 60.0f) * FLOW_AUX_ML_PER_MIN;
+    doseAndLog(4, "aux", PIN_PUMP_AUX, ml, FLOW_AUX_ML_PER_MIN, "slot");
   }
 
   Serial.println("=== LIVE DOSE COMPLETE ===");
@@ -1045,47 +1156,70 @@ void runLiveDoseOnce() {
 
 // Check /devices/{DEVICE_ID}/commands/liveDose
 bool firebaseCheckAndHandleLiveDose() {
-  if (WiFi.status() != WL_CONNECTED) {
-    return false;
-  }
-
-  String path = "/devices/" + String(DEVICE_ID) + "/commands/liveDose";
+  const String path = "/devices/" + String(DEVICE_ID) + "/commands/liveDose";
   String payload = firebaseGetJson(path);
-  if (payload.length() == 0 || payload == "null") {
+
+  // Typical payload:
+  // {"trigger":true,"pump":1,"ml":5}
+  if (payload.length() == 0 || payload == "null") return false;
+
+  StaticJsonDocument<256> doc;
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    Serial.println("LiveDose: JSON parse error, ignoring");
     return false;
   }
 
-  Serial.print("liveDose payload: ");
-  Serial.println(payload);
-
-  // Look for "trigger":true
-  int trigIdx = payload.indexOf("\"trigger\"");
-  if (trigIdx < 0) return false;
-  int colonIdx = payload.indexOf(':', trigIdx);
-  if (colonIdx < 0) return false;
-  String valStr = payload.substring(colonIdx + 1);
-  valStr.trim();
-
-  bool trigger = false;
-  // Accept true, true, or true}
-  if (valStr.startsWith("true") || valStr.startsWith(" true")) {
-    trigger = true;
-  }
-
+  bool trigger = doc["trigger"] | false;
   if (!trigger) return false;
 
-  // Run live dose
-  runLiveDoseOnce();
+  int pump = doc["pump"] | 0;
+  float ml = doc["ml"] | 0.0f;
 
-  // Clear / annotate command
-  time_t nowSec = time(NULL);
-  uint64_t tsMs = (nowSec > 0) ? (uint64_t)nowSec * 1000ULL : (uint64_t)millis();
+  // Safety sanity checks
+  if (pump < 1 || pump > 4 || ml <= 0.0f) {
+    Serial.println("LiveDose: invalid pump/ml, clearing trigger");
+    String clearJson = "{\"trigger\":false,\"lastRun\":" + String((unsigned long long)getEpochMillis()) + "}";
+    firebasePutJson(path, clearJson);
+    return true;
+  }
 
-  String clearJson = "{";
-  clearJson += "\"trigger\":false,";
-  clearJson += "\"lastRun\":" + String((unsigned long long)tsMs);
-  clearJson += "}";
+  int pin = -1;
+  float flow = 0.0f;
+  String pumpName;
 
+  switch (pump) {
+    case 1: pin = PIN_PUMP_KALK; flow = FLOW_KALK_ML_PER_MIN; pumpName = "kalk"; break;
+    case 2: pin = PIN_PUMP_AFR;  flow = FLOW_AFR_ML_PER_MIN;  pumpName = "afr";  break;
+    case 3: pin = PIN_PUMP_MG;   flow = FLOW_MG_ML_PER_MIN;   pumpName = "mg";   break;
+    case 4: pin = PIN_PUMP_AUX;  flow = FLOW_AUX_ML_PER_MIN;  pumpName = "aux";  break;
+  }
+
+  if (pin < 0 || flow <= 0.0f) {
+    Serial.println("LiveDose: invalid pin/flow, clearing trigger");
+    String clearJson = "{\"trigger\":false,\"lastRun\":" + String((unsigned long long)getEpochMillis()) + "}";
+    firebasePutJson(path, clearJson);
+    return true;
+  }
+
+  // Clamp to something sane so you don't accidentally run for hours from a typo.
+  const float maxMl = 2000.0f; // adjust later if you want
+  if (ml > maxMl) ml = maxMl;
+
+  const float durationSec = (ml / flow) * 60.0f;
+  Serial.printf("LiveDose: pump %d (%s) pin %d, %.2f ml @ %.2f ml/min => %.2f sec\n",
+                pump, pumpName.c_str(), pin, ml, flow, durationSec);
+
+  doseAndLog(pump, pumpName, pin, ml, flow, "live");
+
+  // Clear trigger + record lastRun + echo values
+  StaticJsonDocument<128> out;
+  out["trigger"] = false;
+  out["lastRun"] = (unsigned long long)getEpochMillis();
+  out["pump"] = pump;
+  out["ml"] = ml;
+  String clearJson;
+  serializeJson(out, clearJson);
   firebasePutJson(path, clearJson);
 
   return true;
@@ -1110,70 +1244,55 @@ int pumpNumToPin(int pump) {
 bool firebaseCheckAndHandleCalibrate() {
   if (WiFi.status() != WL_CONNECTED) return false;
 
-  String path = "/devices/" + String(DEVICE_ID) + "/commands/calibrate";
+  const String path = "/devices/" + String(DEVICE_ID) + "/commands/calibrate";
   String payload = firebaseGetJson(path);
   if (payload.length() == 0 || payload == "null") return false;
 
   Serial.print("calibrate payload: ");
   Serial.println(payload);
 
-  // trigger
-  int trigIdx = payload.indexOf("\"trigger\"");
-  if (trigIdx < 0) return false;
-  int colonIdx = payload.indexOf(':', trigIdx);
-  if (colonIdx < 0) return false;
-  String valStr = payload.substring(colonIdx + 1);
-  valStr.trim();
-  bool trigger = valStr.startsWith("true");
+  StaticJsonDocument<384> doc;
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    Serial.println("Calibrate: JSON parse error, ignoring");
+    return false;
+  }
 
+  // IMPORTANT: Only honor TOP-LEVEL trigger. This prevents accidental triggers if some other
+  // object (like liveDose) gets nested under calibrate in RTDB.
+  bool trigger = doc["trigger"] | false;
   if (!trigger) return false;
 
-  // pump number (default 1)
-  int pump = 1;
-  int pIdx = payload.indexOf("\"pump\"");
-  if (pIdx >= 0) {
-    int pColon = payload.indexOf(':', pIdx);
-    if (pColon >= 0) {
-      String pStr = payload.substring(pColon + 1);
-      pStr.trim();
-      pump = pStr.toInt();
-    }
-  }
+  int pump = doc["pump"] | 1;
+  int durationSec = doc["durationSec"] | 60;
 
-  // duration seconds (default 60)
-  int durationSec = 60;
-  int dIdx = payload.indexOf("\"durationSec\"");
-  if (dIdx >= 0) {
-    int dColon = payload.indexOf(':', dIdx);
-    if (dColon >= 0) {
-      String dStr = payload.substring(dColon + 1);
-      dStr.trim();
-      durationSec = dStr.toInt();
-      if (durationSec <= 0) durationSec = 60;
-      if (durationSec > 300) durationSec = 300; // safety cap
-    }
-  }
+  if (pump < 1) pump = 1;
+  if (pump > 4) pump = 4;
+
+  if (durationSec <= 0) durationSec = 60;
+  if (durationSec > 300) durationSec = 300; // safety cap
 
   int pin = pumpNumToPin(pump);
   if (pin < 0) {
-    Serial.println("Calibrate: invalid pump number");
+    Serial.println("Calibrate: invalid pump number, clearing trigger");
   } else {
-    Serial.printf("Calibrate: running pump %d on pin %d for %d sec...\n", pump, pin, durationSec);
+    Serial.printf("Calibrate: running pump %d on pin %d for %d sec...\n",
+                  pump, pin, durationSec);
+
     giveDose(pin, (float)durationSec);
+
     Serial.println("Calibrate: done.");
   }
 
-  // Clear trigger and write lastRun
-  time_t nowSec = time(NULL);
-  uint64_t tsMs = (nowSec > 0) ? (uint64_t)nowSec * 1000ULL : (uint64_t)millis();
+  // Clear trigger + record lastRun
+  StaticJsonDocument<192> out;
+  out["trigger"] = false;
+  out["lastRun"] = (unsigned long long)getEpochMillis();
+  out["pump"] = pump;
+  out["durationSec"] = durationSec;
 
-  String clearJson = "{";
-  clearJson += "\"trigger\":false,";
-  clearJson += "\"lastRun\":" + String((unsigned long long)tsMs) + ",";
-  clearJson += "\"pump\":" + String(pump) + ",";
-  clearJson += "\"durationSec\":" + String(durationSec);
-  clearJson += "}";
-
+  String clearJson;
+  serializeJson(out, clearJson);
   firebasePutJson(path, clearJson);
 
   return true;
@@ -1569,7 +1688,14 @@ void setup(){
   // Load last saved AI dosing plan from NVS (if any)
   loadDosingFromPrefs();
   loadFlowFromPrefs();
+  // Sanity-check stored flow rates (bad values can cause hour-long pump runs)
+validateFlow("KALK", FLOW_KALK_ML_PER_MIN, 675.0f);
+validateFlow("AFR",  FLOW_AFR_ML_PER_MIN,  645.0f);
+validateFlow("MG",   FLOW_MG_ML_PER_MIN,    50.0f);
+validateFlow("AUX",  FLOW_AUX_ML_PER_MIN,   50.0f);
   updatePumpSchedules();
+  doseSlotsPrimed = false; // re-prime after time sync
+
   lastSafetyBackoffTs = nowSeconds();
 
   // Connect to home Wi-Fi
@@ -1601,6 +1727,8 @@ void setup(){
     Serial.println("Failed to obtain time from NTP");
   } else {
     Serial.println("Time synchronized from NTP");
+    // Option A: do NOT catch up on missed slots after a reboot
+    primeDoseSlotsForToday();
   }
 
   // Web server routes

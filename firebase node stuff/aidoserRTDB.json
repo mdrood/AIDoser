@@ -1,0 +1,1074 @@
+{
+  "devices": {
+    "reefDoser1": {
+      "alerts": {
+        "-Ojrg1qBFpHfkr7bpw3m": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:21",
+          "timestamp": 1769387076000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-Ojrg29yZ29OUwd2N4Lk": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:21",
+          "timestamp": 1769387077000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OjrguCiw4B4YQlk2apr": {
+          "body": "192.168.4.63",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:28",
+          "timestamp": 1769387302000,
+          "title": "Reef doser booted",
+          "type": "online"
+        },
+        "-Ojrh80_sRuv1T2Gh49I": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:28",
+          "timestamp": 1769387363000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-Ojrh8LFi-LlJF5YQahD": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:28",
+          "timestamp": 1769387365000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OjrhMz40nRCbder-3K2": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:28",
+          "timestamp": 1769387425000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OjrhNIXDUmdXkIhRwq6": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:28",
+          "timestamp": 1769387426000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-Ojrhawlcnw7WoPEdwHX": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:28",
+          "timestamp": 1769387486000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OjrhbGV3_z8TeJ1AvWI": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:28",
+          "timestamp": 1769387487000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OjrmNlsGnvXOFPSRgUd": {
+          "body": "192.168.4.63",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:52",
+          "timestamp": 1769388738000,
+          "title": "Reef doser booted",
+          "type": "online"
+        },
+        "-Ojrmb_oYU8_IM6_rGXO": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:52",
+          "timestamp": 1769388799000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OjrmbuZY51JiHL5tIm8": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:52",
+          "timestamp": 1769388800000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OjrmqYTOKGVgshgEHdO": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:52",
+          "timestamp": 1769388860000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OjrmqsBpFlRpYNHo1X3": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:52",
+          "timestamp": 1769388862000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-Ojrn14yaPxvulDo2oEM": {
+          "body": "192.168.4.63",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:55",
+          "timestamp": 1769388907000,
+          "title": "Reef doser booted",
+          "type": "online"
+        },
+        "-OjrnUinrzRKJVWRuGQ7": {
+          "body": "192.168.4.63",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:57",
+          "timestamp": 1769389029000,
+          "title": "Reef doser booted",
+          "type": "online"
+        },
+        "-OjrniZDqEevkMEpwczE": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:57",
+          "timestamp": 1769389090000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OjrnitIkiOK7VlXSjLM": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-25 18:57",
+          "timestamp": 1769389091000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-Ojro84Rjt6MSRoTh4Fg": {
+          "body": "192.168.4.63",
+          "deviceId": "reefDoser1",
+          "extra": "time unknown",
+          "timestamp": 20085,
+          "title": "Reef doser booted",
+          "type": "online"
+        },
+        "-OkBG6rQRjfCfeesRro0": {
+          "body": "192.168.4.63",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 18:19",
+          "timestamp": 1769732340000,
+          "title": "Reef doser booted",
+          "type": "online"
+        },
+        "-OkBGDGFNogLay9tIYQN": {
+          "body": "192.168.4.63",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 18:19",
+          "timestamp": 1769732366000,
+          "title": "Reef doser booted",
+          "type": "online"
+        },
+        "-OkBGS4-tas0qBCknvRf": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 18:19",
+          "timestamp": 1769732427000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OkBGSOUexCxaIvou5K2": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 18:19",
+          "timestamp": 1769732428000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OkBGg15sZV68y5IL_16": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 18:19",
+          "timestamp": 1769732488000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OkBGgLf4wk4gZb08aLo": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 18:19",
+          "timestamp": 1769732489000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OkBGuzUrPk4RmPGXzoz": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 18:19",
+          "timestamp": 1769732549000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OkBGvJ6Cx8XYQtqJN_R": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 18:19",
+          "timestamp": 1769732551000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OkB_Eeo7_BF-b6ACEjN": {
+          "body": "192.168.4.63",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 19:46",
+          "timestamp": 1769737615000,
+          "title": "Reef doser booted",
+          "type": "online"
+        },
+        "-OkB_TTZiffVcEWw5wGe": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 19:46",
+          "timestamp": 1769737675000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OkB_TnAPtyC-AiI5vPf": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 19:46",
+          "timestamp": 1769737677000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OkB_hVKN3ZNuPKd5UAW": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 19:46",
+          "timestamp": 1769737737000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OkB_howKAfywnqd85fi": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 19:46",
+          "timestamp": 1769737738000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OkB_wSb10JhFxTkeL5J": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 19:46",
+          "timestamp": 1769737798000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OkB_wm4UVO2pMArBNuR": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 19:46",
+          "timestamp": 1769737800000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OkBav1IC4dzpaMm3uA9": {
+          "body": "192.168.4.63",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 19:54",
+          "timestamp": 1769738054000,
+          "title": "Reef doser booted",
+          "type": "online"
+        },
+        "-OkBb8pwbVigvevsSsYo": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 19:54",
+          "timestamp": 1769738115000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OkBb99iW_JQSzl0lt8T": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 19:54",
+          "timestamp": 1769738116000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OkBbNneZP3OR8HZI6KN": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 19:54",
+          "timestamp": 1769738176000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OkBbO7EXUgVnjmwjJba": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 19:54",
+          "timestamp": 1769738178000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OkBbblD8e9w2wH2rs2-": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 19:54",
+          "timestamp": 1769738238000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OkBbc4hPoH5q53pHwIt": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 19:54",
+          "timestamp": 1769738239000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OkBcp2dz_Ya5_blOe0L": {
+          "body": "192.168.4.63",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 20:02",
+          "timestamp": 1769738554000,
+          "title": "Reef doser booted",
+          "type": "online"
+        },
+        "-OkBd2rUQx8YR_Gmattd": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 20:02",
+          "timestamp": 1769738615000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OkBd3BEJfNwyhVelSq6": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 20:02",
+          "timestamp": 1769738616000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OkBdHowSVswji2TN9m2": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 20:02",
+          "timestamp": 1769738676000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OkBdI8QSRPhvnd51hdQ": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 20:02",
+          "timestamp": 1769738678000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OkBdWmCJBEgJ2aqIvMt": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 20:02",
+          "timestamp": 1769738738000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OkBdX5jczdT-7A49HvK": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 20:02",
+          "timestamp": 1769738739000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OkBlhC_fRPFRtpUUVC6": {
+          "body": "192.168.4.63",
+          "deviceId": "reefDoser1",
+          "extra": "2026-01-29 20:41",
+          "timestamp": 1769740881000,
+          "title": "Reef doser booted",
+          "type": "online"
+        }
+      },
+      "commands": {
+        "liveDose": {
+          "lastRun": 0,
+          "trigger": false
+        },
+        "resetAi": false
+      },
+      "dosingPlan": {
+        "afr": 40,
+        "kalk": 120,
+        "mg": 10
+      },
+      "meta": {
+        "createdAt": 1769274000000,
+        "espId": "ESP32-001",
+        "firmware": "1.0.0",
+        "lastSeenAt": 0,
+        "location": "Baseement",
+        "logoUrl": "https://aidoser.web.app/markLogo.jpg",
+        "name": "Mark's Reef",
+        "tankVolumeGallons": 300
+      },
+      "otaRequest": {
+        "url": ""
+      },
+      "otaStatus": {
+        "error": "otaRequest url empty",
+        "status": "error",
+        "updatedAt": 1769386852000
+      },
+      "settings": {
+        "dosing": {
+          "afr": {
+            "enabled": true,
+            "maxMlPerDay": 120
+          },
+          "kalk": {
+            "enabled": true,
+            "maxMlPerDay": 300
+          },
+          "mg": {
+            "enabled": true,
+            "maxMlPerDay": 60
+          }
+        },
+        "targets": {
+          "alk": 9,
+          "ca": 420,
+          "mg": 1440,
+          "ph": 8.2
+        }
+      },
+      "state": {
+        "fwVersion": "1.0.0-esp32",
+        "lastSeen": 1769740882000,
+        "offlineSince": 1769912161618,
+        "online": false
+      },
+      "tests": {
+        "-OjpZ-Uj2c-bFHHapxTB": {
+          "alk": 10.6,
+          "ca": 425,
+          "mg": 1200,
+          "ph": 8.1,
+          "timestamp": 1769351415832
+        },
+        "-Ok4HfqjxDFP6rAImUZk": {
+          "alk": 12.2,
+          "ca": 450,
+          "mg": 1300,
+          "ph": 8.1,
+          "timestamp": 1769615310309
+        },
+        "-OkJZGY9sxUM6DTAu-p3": {
+          "alk": 11.3,
+          "ca": 450,
+          "mg": 1260,
+          "ph": 8.2,
+          "timestamp": 1769871579371
+        }
+      }
+    },
+    "reefDoser2": {
+      "alerts": {
+        "-OjuvUz-RnzYuA577r8E": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser2",
+          "extra": "2026-01-26 09:30",
+          "timestamp": 1769441459000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OjuvVIdKHjMtTCfgXuF": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser2",
+          "extra": "2026-01-26 09:30",
+          "timestamp": 1769441460000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-Ojv6GQrohqp82P0Z1Pw": {
+          "body": "192.168.4.63",
+          "deviceId": "reefDoser2",
+          "extra": "2026-01-26 10:22",
+          "timestamp": 1769444545000,
+          "title": "Reef doser booted",
+          "type": "online"
+        },
+        "-Ojv6VEjFc4csAE_QW8G": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser2",
+          "extra": "2026-01-26 10:22",
+          "timestamp": 1769444606000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-Ojv6VZGNeiw-bCyA9bR": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser2",
+          "extra": "2026-01-26 10:22",
+          "timestamp": 1769444607000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        },
+        "-OjvGLzLoS0jdz8KTMAi": {
+          "body": "192.168.4.63",
+          "deviceId": "reefDoser2",
+          "extra": "2026-01-26 11:06",
+          "timestamp": 1769447189000,
+          "title": "Reef doser booted",
+          "type": "online"
+        },
+        "-OjvG_nJRtGIPfpE2fKI": {
+          "body": "666.7 ml",
+          "deviceId": "reefDoser2",
+          "extra": "2026-01-26 11:06",
+          "timestamp": 1769447250000,
+          "title": "Kalk dose",
+          "type": "dose"
+        },
+        "-OjvGa71U7n9XKEzAxMN": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser2",
+          "extra": "2026-01-26 11:06",
+          "timestamp": 1769447251000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        }
+      },
+      "commands": {
+        "liveDose": {
+          "lastRun": 0,
+          "trigger": false
+        },
+        "resetAi": false
+      },
+      "dosingPlan": {
+        "afr": 120,
+        "kalk": 360,
+        "mg": 30
+      },
+      "meta": {
+        "createdAt": 1769274000000,
+        "espId": "ESP32-002",
+        "firmware": "1.0.0",
+        "lastSeenAt": 0,
+        "location": "Garage",
+        "logoUrl": "https://aidoser.web.app/ericLogo.jpg",
+        "name": "Eric's Reef",
+        "tankVolumeGallons": 1101
+      },
+      "otaRequest": {
+        "url": "https://aidoser.web.app/device/reefDoser2/firmware.bin"
+      },
+      "settings": {
+        "dosing": {
+          "afr": {
+            "enabled": true,
+            "maxMlPerDay": 120
+          },
+          "kalk": {
+            "enabled": true,
+            "maxMlPerDay": 300
+          },
+          "mg": {
+            "enabled": true,
+            "maxMlPerDay": 60
+          }
+        },
+        "targets": {
+          "alk": 9,
+          "ca": 420,
+          "mg": 1440,
+          "ph": 8.2
+        }
+      },
+      "state": {
+        "fwVersion": "1.0.0-esp32",
+        "lastSeen": 1769447674000,
+        "offlineSince": 1769912161618,
+        "online": false
+      },
+      "tests": {
+        "-OjlhV9-RUpHYn42uZTo": {
+          "alk": 8.1,
+          "ca": 410,
+          "mg": 1392,
+          "ph": 8.24,
+          "timestamp": 1769286795962
+        },
+        "-OjqB0HqeAzPbYpWUQlT": {
+          "alk": 8.2,
+          "ca": 398,
+          "mg": 1387,
+          "ph": 8.17,
+          "timestamp": 1769361904870
+        },
+        "-OjuTUrdRz2oJ-z0yS_u": {
+          "alk": 8.2,
+          "ca": 387,
+          "mg": 1389,
+          "ph": 8.15,
+          "timestamp": 1769433857566
+        },
+        "-OjvMJu6AxGS68-RnA2p": {
+          "alk": 8.25,
+          "ca": 394,
+          "mg": 1384,
+          "ph": 8.15,
+          "timestamp": 1769448754887
+        }
+      }
+    },
+    "reefDoser3": {
+      "commands": {
+        "liveDose": {
+          "lastRun": 0,
+          "trigger": false
+        },
+        "resetAi": false
+      },
+      "dosingPlan": {
+        "afr": 40,
+        "kalk": 120,
+        "mg": 10
+      },
+      "meta": {
+        "createdAt": 1769274000000,
+        "espId": "ESP32-001",
+        "firmware": "1.0.0",
+        "lastSeenAt": 0,
+        "location": "Home",
+        "logoUrl": "https://aidoser.web.app/ericLogo.jpg",
+        "name": "Don's Reef",
+        "tankVolumeGallons": 180
+      },
+      "otaRequest": {
+        "url": "https://aidoser.web.app/device/reefDoser3/firmware.bin"
+      },
+      "settings": {
+        "dosing": {
+          "afr": {
+            "enabled": true,
+            "maxMlPerDay": 120
+          },
+          "kalk": {
+            "enabled": true,
+            "maxMlPerDay": 300
+          },
+          "mg": {
+            "enabled": true,
+            "maxMlPerDay": 60
+          }
+        },
+        "targets": {
+          "alk": 9,
+          "ca": 420,
+          "mg": 1440,
+          "ph": 8.2
+        }
+      },
+      "state": {
+        "fwVersion": "1.0.0-esp32",
+        "lastSeen": 1769373502000,
+        "offlineSince": 1769912161618,
+        "online": false
+      },
+      "tests": {
+        "-OjpZ-Uj2c-bFHHapxTB": {
+          "alk": 10.6,
+          "ca": 425,
+          "mg": 1200,
+          "ph": 8.1,
+          "timestamp": 1769351415832
+        }
+      }
+    },
+    "reefDoser4": {
+      "commands": {
+        "liveDose": {
+          "lastRun": 0,
+          "trigger": false
+        },
+        "resetAi": false
+      },
+      "dosingPlan": {
+        "afr": 40,
+        "kalk": 120,
+        "mg": 10
+      },
+      "meta": {
+        "createdAt": 1769274000000,
+        "espId": "ESP32-001",
+        "firmware": "1.0.0",
+        "lastSeenAt": 0,
+        "location": "Home",
+        "logoUrl": "https://aidoser.web.app/ericLogo.jpg",
+        "name": "Don's Reef",
+        "tankVolumeGallons": 130
+      },
+      "otaRequest": {
+        "url": "https://aidoser.web.app/device/reefDoser4/firmware.bin"
+      },
+      "settings": {
+        "dosing": {
+          "afr": {
+            "enabled": true,
+            "maxMlPerDay": 120
+          },
+          "kalk": {
+            "enabled": true,
+            "maxMlPerDay": 300
+          },
+          "mg": {
+            "enabled": true,
+            "maxMlPerDay": 60
+          }
+        },
+        "targets": {
+          "alk": 9,
+          "ca": 420,
+          "mg": 1440,
+          "ph": 8.2
+        }
+      },
+      "state": {
+        "fwVersion": "1.0.0-esp32",
+        "lastSeen": 1769373502000,
+        "offlineSince": 1769912161618,
+        "online": false
+      }
+    },
+    "reefDoser5": {
+      "alerts": {
+        "-OjvIMeSeUYbtpvGrxnZ": {
+          "body": "192.168.4.63",
+          "deviceId": "reefDoser5",
+          "extra": "2026-01-26 11:15",
+          "timestamp": 1769447716000,
+          "title": "Reef doser booted",
+          "type": "online"
+        }
+      },
+      "alertsLatest": {
+        "dose": {
+          "body": "6.7 ml",
+          "deviceId": "reefDoser5",
+          "extra": "2026-01-30 20:53",
+          "timestamp": 1769828173000,
+          "title": "AllForReef dose",
+          "type": "dose"
+        }
+      },
+      "calibration": {
+        "pumps": {
+          "pump1": {
+            "ml_per_min": 650,
+            "ts": 1769706956630
+          },
+          "pump2": {
+            "ml_per_60s": 600,
+            "ml_per_min": 600,
+            "ts": 1769741772116
+          }
+        }
+      },
+      "commands": {
+        "calibrate": {
+          "durationSec": 60,
+          "lastRun": 1769830311000,
+          "pump": 1,
+          "trigger": false
+        },
+        "liveDose": {
+          "lastRun": 0,
+          "trigger": false
+        },
+        "resetAi": false
+      },
+      "dosingPlan": {
+        "afr": 40,
+        "kalk": 120,
+        "mg": 10
+      },
+      "meta": {
+        "createdAt": 1769274000000,
+        "espId": "ESP32-001",
+        "firmware": "1.0.0",
+        "lastSeenAt": 0,
+        "location": "Home",
+        "logoUrl": "https://aidoser.web.app/ericLogo.jpg",
+        "name": "Don's Reef",
+        "tankVolumeGallons": 180
+      },
+      "notifications": {
+        "-OkGd9smdVT13CnAGfbT": {
+          "body": "reefDoser5 booted. IP 192.168.4.63",
+          "deviceId": "reefDoser5",
+          "severity": "info",
+          "title": "ReefDoser Online",
+          "ts": 1769822530000
+        },
+        "-OkGuXy4PxrkXvbYUDfu": {
+          "body": "reefDoser5 booted. IP 192.168.4.63",
+          "deviceId": "reefDoser5",
+          "severity": "info",
+          "title": "ReefDoser Online",
+          "ts": 1769827085000
+        },
+        "-OkGxmewDe4X-nXtQVrs": {
+          "body": "reefDoser5 booted. IP 192.168.4.63",
+          "deviceId": "reefDoser5",
+          "severity": "info",
+          "title": "ReefDoser Online",
+          "ts": 1769827935000
+        },
+        "-OkGxxhqQAm3s25gco_4": {
+          "body": "reefDoser5 booted. IP 192.168.4.63",
+          "deviceId": "reefDoser5",
+          "pushedAt": 1769827983137,
+          "severity": "critical",
+          "title": "ReefDoser Online",
+          "ts": 1769827979000
+        },
+        "-OkH32C4ocWmC2K2ai74": {
+          "body": "reefDoser5 booted. IP 192.168.4.63",
+          "deviceId": "reefDoser5",
+          "pushedAt": 1769829580728,
+          "severity": "critical",
+          "title": "ReefDoser Online",
+          "ts": 1769829576000
+        },
+        "-OkH33OnfAGJSBh9Pok6": {
+          "body": "reefDoser5 booted. IP 192.168.4.63",
+          "deviceId": "reefDoser5",
+          "pushedAt": 1769829583221,
+          "severity": "critical",
+          "title": "ReefDoser Online",
+          "ts": 1769829581000
+        },
+        "-OkH8AYEbKKQauhE8ziT": {
+          "body": "reefDoser5 booted. IP 192.168.4.63",
+          "deviceId": "reefDoser5",
+          "pushedAt": 1769830925042,
+          "severity": "critical",
+          "title": "ReefDoser Online",
+          "ts": 1769830921000
+        },
+        "-OkHR-8HmthG3jdZXwXS": {
+          "body": "reefDoser5 booted. IP 192.168.4.63",
+          "deviceId": "reefDoser5",
+          "pushedAt": 1769835859144,
+          "severity": "critical",
+          "title": "ReefDoser Online",
+          "ts": 1769835855000
+        },
+        "-OkMFqPn8yfPGugK4eZS": {
+          "body": "reefDoser5 booted. IP 192.168.4.63",
+          "deviceId": "reefDoser5",
+          "pushedAt": 1769916821226,
+          "severity": "critical",
+          "title": "ReefDoser Online",
+          "ts": 1769916818000
+        },
+        "-OkMJMzZoTisWL-m9qJv": {
+          "body": "No heartbeat since 1/31/2026, 9:44:49 PM",
+          "deviceId": "reefDoser5",
+          "pushedAt": 1769917745359,
+          "severity": "critical",
+          "title": "reefDoser5 offline",
+          "ts": 1769917742821,
+          "type": "device_offline"
+        },
+        "skippy": {
+          "body": "If you see this, iPhone push works!",
+          "pushedAt": 1769806994325,
+          "severity": "critical",
+          "title": "ReefDoser skippy  Test",
+          "ts": 17698040000500
+        },
+        "skippy2": {
+          "body": "If you see this, iPhone push works!",
+          "pushedAt": 1769822278664,
+          "severity": "critical",
+          "title": "ReefDoser skippy  Test",
+          "ts": 17698040000555
+        },
+        "skippy3": {
+          "body": "Helmet!",
+          "pushedAt": 1769915375273,
+          "severity": "critical",
+          "title": "ReefDoser skippy  Test",
+          "ts": 17698040000537
+        },
+        "test_1738290000000": {
+          "body": "This should trigger push",
+          "pushedAt": 1769915728504,
+          "severity": "critical",
+          "title": "Console Test",
+          "ts": 1769840000000,
+          "type": "test"
+        }
+      },
+      "otaStatus": {
+        "status": "success",
+        "updatedAt": 1769835849000
+      },
+      "pushTokens": {
+        "eIdMf6cwqwzsucxwqxKqyo:APA91bFmnSTir7f5YoMyZVtqVaDbUVZ8Fr4ktwhw7oy7PiNP70EmVk5Hx0sXlPfD8Setk-RnkVXIkcIQ0jsk9KAj_G47V8AQe_3Neg0a-HD8WQBqHQRN41U": {
+          "platform": "ios-pwa",
+          "ts": 1769796688687,
+          "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Mobile/15E148 Safari/604.1"
+        }
+      },
+      "settings": {
+        "dosing": {
+          "afr": {
+            "enabled": true,
+            "maxMlPerDay": 120
+          },
+          "kalk": {
+            "enabled": true,
+            "maxMlPerDay": 300
+          },
+          "mg": {
+            "enabled": true,
+            "maxMlPerDay": 60
+          }
+        },
+        "targets": {
+          "alk": 9,
+          "ca": 420,
+          "mg": 1440,
+          "ph": 8.2
+        }
+      },
+      "state": {
+        "fwVersion": "1.0.0-esp32",
+        "lastSeen": 1769917489000,
+        "offlineSince": 1769917742821,
+        "online": false
+      },
+      "tests": {
+        "-Ok9v9NSma142N5WmycC": {
+          "alk": 10.2,
+          "ca": 450,
+          "mg": 1200,
+          "ph": 8.1,
+          "timestamp": 1769709807238
+        },
+        "-Ok9yxsgxnHQUcMJFAb3": {
+          "alk": 10,
+          "ca": 425,
+          "mg": 1440,
+          "ph": 8.4,
+          "timestamp": 1769710804556
+        },
+        "-OkAJ5JkZ-68DnnVjnN-": {
+          "alk": 500,
+          "ca": 400,
+          "mg": 1400,
+          "ph": 8,
+          "timestamp": 1769716343987
+        }
+      }
+    }
+  },
+  "users": {
+    "4JtXbD0RUreXkI6cwxOz146TAWE3": {
+      "devices": {
+        "reefDoser1": {
+          "alias": "Basement Tank",
+          "role": "owner"
+        }
+      },
+      "email": "markdamonrood@gmail.com",
+      "lastLoginAt": 1769787449670,
+      "notificationPrefs": {
+        "emailEnabled": true,
+        "smsEnabled": true,
+        "smsNumber": "+13143412528"
+      },
+      "updatedAt": 1769274297648
+    },
+    "By4XABC2TXQaFcbdoGPO7tCMnSa2": {
+      "devices": {
+        "reefDoser3": {
+          "alias": "Home Tank",
+          "role": "owner"
+        }
+      },
+      "email": "bucekr@gmail.com",
+      "lastLoginAt": 1769702050559,
+      "notificationPrefs": {
+        "emailEnabled": true,
+        "smsEnabled": true,
+        "smsNumber": "+13143412528"
+      },
+      "updatedAt": 1769274308563
+    },
+    "XhwnUt4LhChKmENrLh8vEJT9EYJ2": {
+      "devices": {
+        "reefDoser2": {
+          "alias": "Basement Tank",
+          "role": "owner"
+        }
+      },
+      "email": "erood@me.com",
+      "lastLoginAt": 1769702122433,
+      "notificationPrefs": {
+        "emailEnabled": true,
+        "smsEnabled": true,
+        "smsNumber": "+19192011474"
+      },
+      "updatedAt": 1769274308563
+    },
+    "bUnAt6i0fIbNYOahYMNAdobRLKm2": {
+      "devices": {
+        "reefDoser5": {
+          "alias": "Corner Tank",
+          "role": "owner"
+        }
+      },
+      "email": "jefflrood@icloud.com",
+      "lastLoginAt": 1769739890758,
+      "notificationPrefs": {
+        "emailEnabled": true,
+        "smsEnabled": true,
+        "smsNumber": "+13143412528"
+      },
+      "pushTokens": {
+        "eIdMf6cwqwzsucxwqxKqyo:APA91bFmnSTir7f5YoMyZVtqVaDbUVZ8Fr4ktwhw7oy7PiNP70EmVk5Hx0sXlPfD8Setk-RnkVXIkcIQ0jsk9KAj_G47V8AQe_3Neg0a-HD8WQBqHQRN41U": {
+          "platform": "ios-pwa",
+          "ts": 1769821825538,
+          "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Mobile/15E148 Safari/604.1"
+        }
+      },
+      "updatedAt": 1769274308563
+    },
+    "lICOW2p3m1Ti1RGyaPdfPDfs7BP2": {
+      "devices": {
+        "reefDoser4": {
+          "alias": "Main Tank",
+          "role": "owner"
+        }
+      },
+      "email": "telegraham@gmail.com",
+      "lastLoginAt": 1769625135505,
+      "notificationPrefs": {
+        "emailEnabled": false,
+        "smsEnabled": true,
+        "smsNumber": "+16619929184"
+      },
+      "updatedAt": 1769274308563
+    }
+  }
+}

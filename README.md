@@ -1,3 +1,6 @@
+Mark plug 6, Eric's middle 2, Jeff's last 5
+
+
 Steps for OTA:
 THE CHIP HAS TO BE BURNED WITH THE DEVICEID SET TO reefDoser1,2,3,4,5,etc
  build the scetch and find in under C:\Users\mdroo\OneDrive\Documents\platformio\AIDoser\.pio\build\esp32doit-devkit-v1/firmware.bin
@@ -6,8 +9,19 @@ THE CHIP HAS TO BE BURNED WITH THE DEVICEID SET TO reefDoser1,2,3,4,5,etc
 
  open dos prompt navigate to C:\Users\mdroo\OneDrive\Firebase\aidoser\public> 
  and type firebase deploy
- then on GUI select file in .....devices/reefDoserx(1,2,3...) 
+ then on GUI select file in .....dev
+ ices/reefDoserx(1,2,3...) 
  push the button Update firmware &  request OTA
+
+ ///////////////to create a new user  /////////////////////
+
+ Create a user in Firebase Authenticaiton.
+ Use that user's key and create at user under aidoser/users  using the key just created
+ create the devce under aidoser/devices/reefDoser6 (get file from firebase stuff folder in project Add_new_device.json).
+
+ 
+
+
 
 
 

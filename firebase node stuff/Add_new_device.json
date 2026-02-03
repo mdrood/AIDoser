@@ -1,0 +1,56 @@
+,
+  "reefDoser6": {
+    "commands": {
+      "liveDose": {
+        "lastRun": 0,
+        "trigger": false
+      },
+      "resetAi": false
+    },
+    "dosingPlan": {
+      "afr": 40,
+      "kalk": 120,
+      "mg": 10
+    },
+    "meta": {
+      "createdAt": 1769274000000,
+      "espId": "ESP32-001",
+      "firmware": "1.0.0",
+      "lastSeenAt": 0,
+      "location": "Home",
+      "logoUrl": "https://aidoser.web.app/ericLogo.jpg",
+      "name": "Don's Reef",
+      "tankVolumeGallons": 130
+    },
+    "otaRequest": {
+      "url": "https://aidoser.web.app/device/reefDoser6/firmware.bin"
+    },
+    "settings": {
+      "dosing": {
+        "afr": {
+          "enabled": true,
+          "maxMlPerDay": 120
+        },
+        "kalk": {
+          "enabled": true,
+          "maxMlPerDay": 300
+        },
+        "mg": {
+          "enabled": true,
+          "maxMlPerDay": 60
+        }
+      },
+      "targets": {
+        "alk": 9,
+        "ca": 420,
+        "mg": 1440,
+        "ph": 8.2
+      }
+    },
+    "state": {
+      "fwVersion": "1.0.1-esp32",
+      "lastSeen": 1769373502000,
+      "offlineSince": 1769912161618,
+      "online": false
+    }
+  }
