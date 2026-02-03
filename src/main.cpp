@@ -51,7 +51,7 @@ const int   DST_OFFSET_SEC = 3600;       // DST +1h (simple)
 
 const char* FIREBASE_DB_URL = "https://aidoser-default-rtdb.firebaseio.com";
 const char* DEVICE_ID       = "reefDoser6";   // 👈 must match your DB path
-const char* FW_VERSION      = "1.0.0-esp32";  // 👈 bump when you flash new firmware
+const char* FW_VERSION      = "1.0.3-esp32";  // 👈 bump when you flash new firmware
 
 WiFiClientSecure secureClient;
 
