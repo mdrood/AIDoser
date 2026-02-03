@@ -213,6 +213,34 @@
           </form>
         </div>
 
+
+        <div class="card">
+          <h3 style="color:var(--accent); margin-top:0;">Live Dose</h3>
+          <div class="muted">Send a one-time dose command to the ESP32 via <code>commands/liveDose</code>. It will run the pump and log to dosing history.</div>
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px;">
+            <div>
+              <label>Pump</label>
+              <select id="liveDosePump">
+                <option value="1">Pump 1 (Kalk)</option>
+                <option value="2">Pump 2 (AFR)</option>
+                <option value="3">Pump 3 (Mag)</option>
+                <option value="4">Pump 4 (Aux)</option>
+              </select>
+            </div>
+            <div>
+              <label>mL</label>
+              <input id="liveDoseMl" type="number" step="0.1" min="0" placeholder="eg. 10">
+            </div>
+          </div>
+
+          <button id="liveDoseBtn" class="btn-action">Run Live Dose</button>
+          <div style="margin-top:10px;">
+            <span class="pill" id="liveDoseStatus" style="border-color: rgba(56,189,248,0.35); color: var(--text-soft);">—</span>
+          </div>
+        </div>
+          <div class="muted" id="liveDoseLast" style="margin-top:6px;">Last: —</div>
+
         <div class="card">
           <h3 style="color:var(--accent); margin-top:0;">Active Dosing Plan</h3>
           <div id="dosingContainer" style="display:flex; flex-direction: column; gap: 10px;"></div>
@@ -246,38 +274,6 @@
   </button>
 </div>
 <div id="otaStatus" style="font-size:0.75rem; margin-top:10px; text-align:center; color: var(--accent); font-weight: 600;"></div>
-
-<!-- LIVE DOSE (RTDB commands/liveDose) -->
-<div style="margin-top:14px; background: rgba(0,0,0,0.25); padding: 16px; border-radius: 12px;">
-  <div style="display:flex; justify-content:space-between; align-items:center; gap: 12px; flex-wrap: wrap;">
-    <div style="font-weight:800; color: var(--accent);">Live Dose</div>
-    <div class="muted" id="liveDoseAck" style="font-size:12px;">Waiting…</div>
-  </div>
-
-  <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top:12px;">
-    <div>
-      <label>Pump</label>
-      <select id="liveDosePump" style="width:100%; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: rgba(2,8,23,0.55); color: var(--text);">
-        <option value="1">1 — Kalk</option>
-        <option value="2">2 — AFR</option>
-        <option value="3">3 — Mg</option>
-        <option value="4">4 — Aux</option>
-      </select>
-    </div>
-    <div>
-      <label>mL</label>
-      <input id="liveDoseMl" type="number" step="0.1" min="0" placeholder="eg. 10" />
-    </div>
-    <div style="display:flex; align-items:flex-end;">
-      <button id="sendLiveDoseBtn" class="btn-action" style="width:100%;">Run Live Dose</button>
-    </div>
-  </div>
-
-  <div class="muted" style="margin-top:10px;">
-    Writes to <code>devices/&lt;deviceId&gt;/commands/liveDose</code> and waits for <code>commands/liveDoseResult</code>.
-  </div>
-</div>
-
         <!-- QUICK ACCESS: Dosing History -->
 
 
@@ -406,7 +402,10 @@
         document.getElementById('loginModal').classList.add('hidden');
         db.ref(`users/${user.uid}/devices`).once('value', snap => {
           if (snap.exists()) {
-            activeDeviceId = Object.keys(snap.val())[0];
+            const devMap = snap.val() || {};
+            const ids = Object.keys(devMap);
+            // Prefer reefDoser6 if present, otherwise first device
+            activeDeviceId = ids.includes("reefDoser6") ? "reefDoser6" : (ids[0] || null);
 
             const devPill = document.getElementById('deviceIdPill');
             if (devPill) devPill.innerText = "Device: " + activeDeviceId;
@@ -421,7 +420,6 @@
     });
 
     function initApp() {
-      attachLiveDoseResultListener();
       // dosing plan pills
       db.ref(`devices/${activeDeviceId}/dosingPlan`).on('value', s => {
         const plan = s.val() || {};
@@ -461,32 +459,59 @@
       });
 
       setupCalibrationUI();
+      setupLiveDoseUI();
+      setupOtaUI();
     }
 
-    // ---- OTA trigger ----
-    document.getElementById('otaUploadBtn').onclick = function() {
-      const fileInput = document.getElementById('otaFile');
-      if (fileInput.files.length === 0) return alert("Please select a .bin file.");
+    
+    // ---- OTA UI + acknowledgement ----
+    function setupOtaUI() {
+      const statusEl = document.getElementById('otaStatus');
+      const urlEl = document.getElementById('otaUrlText');
+      const btn = document.getElementById('otaUploadBtn');
+      if (!btn) return;
 
-      const fileName = fileInput.files[0].name;
-      const status = document.getElementById('otaStatus');
-      status.innerText = "Triggering OTA for: " + fileName;
+      if (!activeDeviceId) {
+        if (statusEl) statusEl.innerText = "OTA: no device selected.";
+        return;
+      }
 
-      // You’ve been using device-specific hosting paths:
-      // https://aidoser.web.app/devices/<deviceId>/firmware.bin
-      // Keep it consistent with what works for your ESP32:
       const hostingUrl = `https://aidoser.web.app/devices/${activeDeviceId}/firmware.bin`;
+      if (urlEl) urlEl.innerText = hostingUrl;
 
-      db.ref(`devices/${activeDeviceId}/otaRequest`).set({
-        fileName: "firmware.bin",
-        url: hostingUrl,
-        requestedAt: firebase.database.ServerValue.TIMESTAMP
-      }).then(() => {
-        status.innerText = "OTA Request Sent. ESP32 will pull from Hosting.";
-      }).catch(err => {
-        status.innerText = "Error: " + err.message;
+      // Live status from the ESP32 (it writes devices/<id>/otaStatus)
+      db.ref(`devices/${activeDeviceId}/otaStatus`).on('value', (snap) => {
+        const v = snap.val();
+        if (!statusEl) return;
+        if (!v) return; // keep current text
+        const s = (typeof v === "string") ? v : (v.status || JSON.stringify(v));
+        const ts = (v.updatedAt) ? (" • " + new Date(v.updatedAt).toLocaleTimeString()) : "";
+        statusEl.innerText = "OTA: " + s + ts;
       });
-    };
+
+      btn.onclick = async function() {
+        try {
+          if (!activeDeviceId) return alert("No device selected.");
+          if (statusEl) statusEl.innerText = "OTA: sending request...";
+
+          await db.ref(`devices/${activeDeviceId}/otaRequest`).set({
+            trigger: true,
+            fileName: "firmware.bin",
+            url: hostingUrl,
+            requestedAt: firebase.database.ServerValue.TIMESTAMP
+          });
+
+          if (statusEl) statusEl.innerText = "OTA: requested. Waiting for device...";
+        } catch (err) {
+          if (statusEl) statusEl.innerText = "OTA error: " + (err?.message || err);
+        }
+      };
+    }
+
+
+// ---- OTA trigger ----
+    // (handler is set in setupOtaUI)
+
 
     // ---- PARAMS CHART ----
     function updateParamsChart(tests) {
@@ -561,6 +586,96 @@
     };
 
     // ---- CALIBRATION ----
+
+    // ---- LIVE DOSE (Finish A) ----
+    function setupLiveDoseUI() {
+      const btn = document.getElementById('liveDoseBtn');
+      const pumpSel = document.getElementById('liveDosePump');
+      const mlInput = document.getElementById('liveDoseMl');
+      const statusEl = document.getElementById('liveDoseStatus');
+      const lastEl = document.getElementById('liveDoseLast');
+
+      function setStatus(text, tone) {
+        if (!statusEl) return;
+        statusEl.innerText = text || "—";
+        // tone: ok | bad | info
+        if (tone === "ok") {
+          statusEl.style.borderColor = "rgba(74,222,128,0.55)";
+          statusEl.style.color = "#bbf7d0";
+        } else if (tone === "bad") {
+          statusEl.style.borderColor = "rgba(249,115,115,0.55)";
+          statusEl.style.color = "#fecaca";
+        } else {
+          statusEl.style.borderColor = "rgba(56,189,248,0.35)";
+          statusEl.style.color = "var(--text-soft)";
+        }
+      }
+
+      if (!btn || !pumpSel || !mlInput) return;
+
+      
+// Watch the command node for progress/completion (ESP32 will set trigger:false and lastRun)
+const cmdRef = db.ref(`devices/${activeDeviceId}/commands/liveDose`);
+cmdRef.off(); // avoid duplicate listeners if initApp re-runs
+cmdRef.on('value', snap => {
+  const v = snap.val() || {};
+  if (v.trigger === true) {
+    setStatus("Running…", "info");
+  } else if (v.lastRun) {
+    const when = new Date(v.lastRun).toLocaleString();
+    setStatus(`✅ Complete (logged) • ${when}`, "ok");
+  } else {
+    setStatus("—", "info");
+  }
+});
+
+// Show last logged dose run (reads from devices/<id>/doseRuns)
+if (lastEl) {
+  const lastRef = db.ref(`devices/${activeDeviceId}/doseRuns`).limitToLast(1);
+  lastRef.off();
+  lastRef.on('value', snap => {
+    const obj = snap.val() || {};
+    const keys = Object.keys(obj);
+    if (!keys.length) { lastEl.textContent = "Last: —"; return; }
+    const r = obj[keys[0]] || {};
+    const ts = r.ts || r.timestamp || r.time || 0;
+    const pump = (r.pump || r.pumpName || r.type || "—");
+    const ml = (typeof r.ml === "number") ? r.ml : Number(r.ml);
+    const when = ts ? new Date(Number(ts)).toLocaleString() : "—";
+    const mlText = isFinite(ml) ? ml.toFixed(1) + " mL" : "—";
+    lastEl.textContent = `Last: ${pump} • ${mlText} • ${when}`;
+  });
+}
+
+      btn.onclick = async () => {
+        const pump = parseInt(pumpSel.value, 10);
+        const ml = parseFloat(mlInput.value);
+        if (!pump || pump < 1 || pump > 4) return setStatus("Pick a pump (1–4).", "bad");
+        if (!isFinite(ml) || ml <= 0) return setStatus("Enter a valid mL amount.", "bad");
+
+        btn.disabled = true;
+        setStatus("Queued…", "info");
+
+        const reqId = "live_" + Date.now();
+        try {
+          await db.ref(`devices/${activeDeviceId}/commands/liveDose`).set({
+            trigger: true,
+            status: "pending",
+            reqId,
+            pump,
+            ml,
+            requestedAt: firebase.database.ServerValue.TIMESTAMP
+          });
+          // ESP32 will flip trigger:false and write lastRun; listener above updates status
+        } catch (e) {
+          setStatus("Error: " + (e.message || e), "bad");
+        } finally {
+          btn.disabled = false;
+        }
+      };
+    }
+
+
     function setupCalibrationUI() {
       const names = ["Kalkwasser (P1)", "All-For-Reef (P2)", "Magnesium (P3)", "Auxiliary (P4)"];
       const grid = document.getElementById('calGrid');
@@ -626,13 +741,44 @@
       });
     }
 
-    let calStatusUnsub = null;
+    
+let calPumpsUnsub = null;
+function attachCalibrationPumpsListener() {
+  if (!activeDeviceId) return;
+  if (calPumpsUnsub) { try { calPumpsUnsub(); } catch(e){} calPumpsUnsub = null; }
+
+  const ref = db.ref(`devices/${activeDeviceId}/calibration/pumps`);
+  const handler = (snap) => {
+    const v = snap.val() || {};
+    for (let n = 1; n <= 4; n++) {
+      const st = document.getElementById(`calStatus${n}`);
+      if (!st) continue;
+      const rec = v[`pump${n}`] || {};
+      const mlpm = rec.ml_per_min ?? rec.mlPerMin ?? rec.flowMlPerMin;
+      if (mlpm && isFinite(Number(mlpm))) {
+        // Only show "Saved" hint if user isn't currently seeing a success/fail message
+        if (!st.innerText || st.innerText.startsWith("Saving") || st.innerText.startsWith("✅") || st.innerText.startsWith("❌")) {
+          // keep current message
+        } else {
+          st.innerText = `Saved: ${Number(mlpm).toFixed(1)} ml/min (from ${rec.ml_caught ?? "?"} ml in ${rec.durationSec ?? 60}s)`;
+        }
+      } else {
+        if (!st.innerText) st.innerText = "No saved calibration yet.";
+      }
+    }
+  };
+  ref.on('value', handler);
+  calPumpsUnsub = () => ref.off('value', handler);
+}
+
+let calStatusUnsub = null;
     function attachCalibrationStatusListener() {
       if (!activeDeviceId) return;
       const ackEl = document.getElementById('calibrationAck');
       if (!ackEl) return;
 
       if (calStatusUnsub) { try { calStatusUnsub(); } catch(e){} calStatusUnsub = null; }
+      if (calPumpsUnsub) { try { calPumpsUnsub(); } catch(e){} calPumpsUnsub = null; }
 
       const ref = db.ref(`devices/${activeDeviceId}/calibration/status`);
       const handler = (snap) => {
@@ -653,10 +799,12 @@
     document.getElementById('openCalibrationBtn').onclick = () => {
       document.getElementById('calibrationOverlay').classList.remove('hidden');
       attachCalibrationStatusListener();
+      attachCalibrationPumpsListener();
     };
     document.getElementById('closeCalibrationBtn').onclick = () => {
       document.getElementById('calibrationOverlay').classList.add('hidden');
       if (calStatusUnsub) { try { calStatusUnsub(); } catch(e){} calStatusUnsub = null; }
+      if (calPumpsUnsub) { try { calPumpsUnsub(); } catch(e){} calPumpsUnsub = null; }
     };
 
     // ---- DOSE RUNS / GRAPH (NEW) ----
@@ -781,74 +929,6 @@
     document.getElementById("doseTabAfr").onclick  = () => setDoseFilter("afr");
     document.getElementById("doseTabMg").onclick   = () => setDoseFilter("mg");
     document.getElementById("doseTabAux").onclick  = () => setDoseFilter("aux");
-
-
-    // ---- LIVE DOSE (RTDB commands/liveDose) ----
-    let liveDoseResultUnsub = null;
-
-    async function sendLiveDose() {
-      if (!activeDeviceId) {
-        alert("No device selected yet.");
-        return;
-      }
-      const pump = Number(document.getElementById("liveDosePump").value || 0);
-      const ml = Number(document.getElementById("liveDoseMl").value || 0);
-
-      if (!(pump >= 1 && pump <= 4) || !(ml > 0)) {
-        alert("Enter a valid pump (1-4) and ml > 0.");
-        return;
-      }
-
-      const reqId = "live_" + Date.now();
-
-      const cmdRef = db.ref(`devices/${activeDeviceId}/commands/liveDose`);
-      const ackEl = document.getElementById("liveDoseAck");
-      ackEl.textContent = "Sending…";
-
-      await cmdRef.set({
-        trigger: true,
-        status: "pending",
-        reqId,
-        pump,
-        ml,
-        requestedAt: Date.now()
-      });
-
-      ackEl.textContent = `Sent ${ml.toFixed(1)} ml to pump ${pump} (reqId: ${reqId})`;
-    }
-
-    function attachLiveDoseResultListener() {
-      if (!activeDeviceId) return;
-
-      if (liveDoseResultUnsub) { try { liveDoseResultUnsub(); } catch(e){} liveDoseResultUnsub = null; }
-
-      const ref = db.ref(`devices/${activeDeviceId}/commands/liveDoseResult`);
-      const ackEl = document.getElementById("liveDoseAck");
-
-      const handler = (snap) => {
-        const r = snap.val();
-        if (!r) return;
-
-        const status = (r.status || "").toString();
-        const ts = Number(r.ts || 0);
-        const when = ts ? new Date(ts).toLocaleString() : "—";
-        const msg = (r.message || r.pumpName || "").toString();
-
-        if (status === "ok") {
-          ackEl.textContent = `✅ ${when} — OK: ${Number(r.ml||0).toFixed(1)} ml (${msg})`;
-        } else if (status === "error") {
-          ackEl.textContent = `❌ ${when} — ERROR: ${msg || "live dose failed"}`;
-        } else {
-          ackEl.textContent = `ℹ️ ${when} — ${status || "update received"}`;
-        }
-      };
-
-      ref.on("value", handler);
-      liveDoseResultUnsub = () => ref.off("value", handler);
-    }
-
-    const liveBtn = document.getElementById("sendLiveDoseBtn");
-    if (liveBtn) liveBtn.onclick = sendLiveDose;
 
     // ---- PUSH ENABLE (iPhone PWA) ----
     async function enableIphonePush() {
