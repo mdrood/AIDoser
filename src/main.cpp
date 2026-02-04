@@ -50,14 +50,16 @@ const int   DST_OFFSET_SEC = 3600;       // DST +1h (simple)
 // ===================== FIREBASE (REST API) =====================
 
 const char* FIREBASE_DB_URL = "https://aidoser-default-rtdb.firebaseio.com";
-const char* DEVICE_ID       = "reefDoser6";   // 👈 must match your DB path
-const char* FW_VERSION      = "1.0.4-esp32";  // 👈 bump when you flash new firmware
+const char* DEVICE_ID       = "reefDoser5";   // 👈 must match your DB path
+const char* FW_VERSION      = "1.0.3-esp32";  // 👈 bump when you flash new firmware
 
 WiFiClientSecure secureClient;
 
 Preferences dosingPrefs;
 
 void firebaseSetCalibrationStatus();
+void updateChemistryConstants();
+
 
 // Build full Firebase URL from a path (e.g. "/devices/reefDoser1/commands/resetAi")
 String firebaseUrl(const String& path) {
@@ -214,7 +216,7 @@ const float TARGET_MG  = 1440.0f;   // ppm   1400
 const float TARGET_PH  = 8.3f;      // pH    8.3
 
 // 300 gal × 3.78541 = 1135.6 L
-const float TANK_VOLUME_L = 1135.6f;
+float TANK_VOLUME_L = 1135.6f; // Default for 300 gallons
 
 
 // ===================== PUMP PINS & FLOW RATES =====================
@@ -329,6 +331,7 @@ void loadFlowFromPrefs() {
 }
 
 
+
 static void validateFlow(const char* name, float &flow, float fallback) {
   // Reasonable range for typical dosing pumps (ml/min). Adjust if needed.
   if (!isfinite(flow) || flow < 30.0f || flow > 5000.0f) {
@@ -405,102 +408,40 @@ float SEC_PER_DOSE_KALK = 0.0f;
 float SEC_PER_DOSE_AFR  = 0.0f;
 float SEC_PER_DOSE_MG   = 0.0f;
 
-// ===================== DOSE WINDOW SCHEDULE (UI-driven) =====================
-// UI writes: /devices/<id>/settings/doseSchedule = { startHour, endHour, everyMin }
+// ===================== DOSING SCHEDULE (DAILY WINDOWS) =====================
 //
-// If a valid doseSchedule exists, we will dose ONLY inside that window and at that interval,
-// splitting each pump's ml/day evenly across the number of intervals in the window.
+// We support either:
+//  - Default (legacy) fixed times: 09:30, 12:30, 15:30
+//  - Configurable window + interval from RTDB: /devices/<id>/settings/doseSchedule
 //
-// startHour: 0..23
-// endHour:   0..23  (if endHour == startHour => treat as 24h window)
-// everyMin:  15, 60, 120, 240
-struct DoseSchedule {
-  int startHour = 0;
-  int endHour   = 0;
-  int everyMin  = 60;
-  bool enabled  = false;
+// Internals use a fixed max slot array so we can change the active slot count at runtime.
+static const int MAX_DOSE_SLOTS = 96; // 24h @ 15-minute resolution
+
+int  DOSE_SLOTS_PER_DAY = 3; // active slots count (runtime)
+int  DOSE_HOURS[MAX_DOSE_SLOTS]   = {9, 12, 15};
+int  DOSE_MINUTES[MAX_DOSE_SLOTS] = {30, 30, 30};
+bool slotDone[MAX_DOSE_SLOTS]     = {false};
+
+// Track day/window reset
+int  lastDoseWindowDay = -1; // yday of the window start (handles wrap windows)
+bool doseSlotsPrimed   = false;
+
+// Config pulled from RTDB
+struct DoseScheduleCfg {
+  bool enabled   = false;
+  int  startHour = 0;   // 0..23
+  int  endHour   = 0;   // 0..23
+  int  everyMin  = 60;  // 15/60/120/240 etc
   uint64_t updatedAt = 0;
 };
-DoseSchedule gSchedule;
+DoseScheduleCfg doseScheduleCfg;
 
-// Persist last scheduled slot executed so we don't "catch up" after reboot.
-int  lastSchedDay  = -1;   // tm_yday
-int  lastSchedSlot = -1;   // slot index within window
-bool schedPrimed   = false;
-
-static inline bool scheduleEveryMinValid(int m) {
-  return (m == 15 || m == 60 || m == 120 || m == 240);
-}
-
-// Returns window length in minutes (1..1440). If invalid, returns 0.
-static int scheduleWindowMinutes(const DoseSchedule& s) {
-  if (!s.enabled) return 0;
-  if (s.startHour < 0 || s.startHour > 23) return 0;
-  if (s.endHour   < 0 || s.endHour   > 23) return 0;
-  if (!scheduleEveryMinValid(s.everyMin)) return 0;
-
-  // Same start/end means "all day"
-  if (s.startHour == s.endHour) return 1440;
-
-  int deltaH = (s.endHour - s.startHour + 24) % 24;  // 1..23
-  return deltaH * 60;
-}
-
-// Minutes since midnight [0..1439]
-static int nowMinutesOfDay(const tm& t) {
-  return t.tm_hour * 60 + t.tm_min;
-}
-
-// True if now is inside dosing window.
-static bool scheduleInWindow(const DoseSchedule& s, int nowMin) {
-  const int startMin = s.startHour * 60;
-  const int endMin   = s.endHour   * 60;
-
-  if (s.startHour == s.endHour) return true; // all day
-  if (startMin < endMin) {
-    return (nowMin >= startMin && nowMin < endMin);
-  } else {
-    // Wraps over midnight
-    return (nowMin >= startMin || nowMin < endMin);
-  }
-}
-
-// Slot index within window, 0..intervals-1
-static int scheduleSlotIndex(const DoseSchedule& s, int nowMin) {
-  const int winMin = scheduleWindowMinutes(s);
-  if (winMin <= 0) return -1;
-
-  const int startMin = s.startHour * 60;
-  int delta;
-  if (s.startHour == s.endHour) {
-    delta = nowMin; // 0..1439
-  } else if (nowMin >= startMin) {
-    delta = nowMin - startMin;
-  } else {
-    delta = (1440 - startMin) + nowMin; // wrapped
-  }
-  return delta / s.everyMin;
-}
-
-static int scheduleIntervals(const DoseSchedule& s) {
-  const int win = scheduleWindowMinutes(s);
-  if (win <= 0) return 0;
-  return win / s.everyMin; // floor
-}
-
-// Real-time schedule: 3 time slots per day (HH:MM)
-// 9:30 AM, 12:30 PM, 3:30 PM (Central Time)
-const int DOSE_SLOTS_PER_DAY = 3;
-int DOSE_HOURS[DOSE_SLOTS_PER_DAY]   = {9, 12, 15};
-int DOSE_MINUTES[DOSE_SLOTS_PER_DAY] = {30, 30, 30};
-
-// Track whether we've dosed each slot for the current day
-int  lastDoseDay = -1;                        // tm_yday of last day we reset
-bool slotDone[DOSE_SLOTS_PER_DAY] = {false, false, false};
-
-// One-time boot helper: when NTP time becomes valid, mark earlier slots as already-done
-// so the device doesn't "catch up" doses immediately after a reboot.
-bool doseSlotsPrimed = false;
+// --- schedule helper prototypes ---
+static int  clampInt(int v, int lo, int hi);
+static bool scheduleWraps(int startHour, int endHour);
+static int  scheduleSlotIndex(const tm& t, int startHour, int endHour, int everyMin);
+static int  windowStartYday(const tm& t, int startHour, int endHour);
+static void rebuildScheduleSlots();
 
 
 // Time validity guard: avoid dosing before NTP sync is real.
@@ -509,29 +450,143 @@ bool isTimeValid(const tm& t) {
   return (t.tm_year >= 123);
 }
 
+// ===================== schedule helpers =====================
+static int clampInt(int v, int lo, int hi) { return (v < lo) ? lo : (v > hi) ? hi : v; }
+
+static bool scheduleWraps(int startHour, int endHour) {
+  startHour = clampInt(startHour, 0, 23);
+  endHour   = clampInt(endHour,   0, 23);
+  return (endHour <= startHour);
+}
+
+// Returns slot index within the dosing window (0..slots-1) or -1 if now is outside window
+static int scheduleSlotIndex(const tm& t, int startHour, int endHour, int everyMin) {
+  startHour = clampInt(startHour, 0, 23);
+  endHour   = clampInt(endHour,   0, 23);
+  everyMin  = clampInt(everyMin,  1, 1440);
+
+  const int nowMin   = t.tm_hour * 60 + t.tm_min;
+  const int startMin = startHour * 60;
+  const int endMin   = endHour * 60;
+
+  int windowLen = 0;
+  int offset = 0;
+
+  if (!scheduleWraps(startHour, endHour)) {
+    // simple window [start,end)
+    if (nowMin < startMin || nowMin >= endMin) return -1;
+    windowLen = endMin - startMin;
+    offset = nowMin - startMin;
+  } else {
+    // wraps over midnight: [start, 24h) U [0, end)
+    windowLen = (24*60 - startMin) + endMin;
+    if (nowMin >= startMin) {
+      offset = nowMin - startMin;
+    } else if (nowMin < endMin) {
+      offset = (24*60 - startMin) + nowMin;
+    } else {
+      return -1;
+    }
+  }
+
+  if (windowLen <= 0) return -1;
+  const int slots = windowLen / everyMin; // floor
+  if (slots <= 0) return -1;
+
+  int idx = offset / everyMin;
+  if (idx < 0) idx = 0;
+  if (idx >= slots) idx = slots - 1;
+  return idx;
+}
+
+// Identify which "window day" we're in (yday of the window start). This makes wrap windows stable.
+static int windowStartYday(const tm& t, int startHour, int endHour) {
+  if (!scheduleWraps(startHour, endHour)) return t.tm_yday;
+  // window starts at startHour; if we're before endHour, we're still in yesterday's window
+  if (t.tm_hour < endHour) return t.tm_yday - 1;
+  return t.tm_yday;
+}
+
+// Build DOSE_HOURS / DOSE_MINUTES arrays from doseScheduleCfg (or legacy defaults).
+static void rebuildScheduleSlots() {
+  // default legacy schedule if not enabled
+  if (!doseScheduleCfg.enabled) {
+    DOSE_SLOTS_PER_DAY = 3;
+    DOSE_HOURS[0] = 9;  DOSE_MINUTES[0] = 30;
+    DOSE_HOURS[1] = 12; DOSE_MINUTES[1] = 30;
+    DOSE_HOURS[2] = 15; DOSE_MINUTES[2] = 30;
+    return;
+  }
+
+  int startHour = clampInt(doseScheduleCfg.startHour, 0, 23);
+  int endHour   = clampInt(doseScheduleCfg.endHour,   0, 23);
+  int everyMin  = clampInt(doseScheduleCfg.everyMin,  1, 240);
+
+  const int startMin = startHour * 60;
+  const int endMin   = endHour * 60;
+  int windowLen = 0;
+  if (!scheduleWraps(startHour, endHour)) {
+    windowLen = endMin - startMin;
+  } else {
+    windowLen = (24*60 - startMin) + endMin;
+  }
+  if (windowLen <= 0) windowLen = 24*60; // fallback
+
+  int slots = windowLen / everyMin;
+  if (slots < 1) slots = 1;
+  if (slots > MAX_DOSE_SLOTS) slots = MAX_DOSE_SLOTS;
+
+  DOSE_SLOTS_PER_DAY = slots;
+
+  for (int i = 0; i < DOSE_SLOTS_PER_DAY; i++) {
+    int m = startMin + i * everyMin;
+    m %= (24*60);
+    DOSE_HOURS[i] = m / 60;
+    DOSE_MINUTES[i] = m % 60;
+    slotDone[i] = false;
+  }
+
+  Serial.printf("DoseSchedule applied: start=%d end=%d every=%dmin (enabled=true)\n",
+                startHour, endHour, everyMin);
+}
+
 // On boot/restart, we do NOT want to "catch up" on earlier slots.
 // When time becomes valid, mark any already-passed slots as done.
 void primeDoseSlotsForToday() {
   struct tm t;
-  if (!getLocalTime(&t)) return;
+  if (!getLocalTime(&t)) {
+    Serial.println("WARN: cannot prime slots (no time yet)");
+    return;
+  }
   if (!isTimeValid(t)) {
-    Serial.println("Dose prime skipped: time not valid yet (waiting for NTP).");
+    Serial.println("WARN: cannot prime slots (time invalid yet)");
     return;
   }
 
-  const int secNow = t.tm_hour * 3600 + t.tm_min * 60 + t.tm_sec;
+  // Ensure slot list reflects current config
+  rebuildScheduleSlots();
 
-  // Mark any slots already in the past as "done"
-  for (int i = 0; i < DOSE_SLOTS_PER_DAY; i++) {
-    const int slotSec = DOSE_HOURS[i] * 3600 + DOSE_MINUTES[i] * 60;
-    if (secNow >= slotSec) slotDone[i] = true;
+  // Reset flags for this dosing window/day
+  lastDoseWindowDay = doseScheduleCfg.enabled ? windowStartYday(t, doseScheduleCfg.startHour, doseScheduleCfg.endHour) : t.tm_yday;
+  for (int i = 0; i < DOSE_SLOTS_PER_DAY; i++) slotDone[i] = false;
+
+  if (doseScheduleCfg.enabled) {
+    const int nowIdx = scheduleSlotIndex(t, doseScheduleCfg.startHour, doseScheduleCfg.endHour, doseScheduleCfg.everyMin);
+    if (nowIdx >= 0) {
+      for (int i = 0; i < nowIdx && i < DOSE_SLOTS_PER_DAY; i++) slotDone[i] = true;
+    }
+  } else {
+    // Legacy compare by time-of-day
+    for (int i = 0; i < DOSE_SLOTS_PER_DAY; i++) {
+      int sh = DOSE_HOURS[i];
+      int sm = DOSE_MINUTES[i];
+      bool reached = (t.tm_hour > sh) || (t.tm_hour == sh && t.tm_min >= sm);
+      if (reached) slotDone[i] = true;
+    }
   }
 
-  lastDoseDay = t.tm_yday;      // prevent immediate "new day" reset
   doseSlotsPrimed = true;
-
-  Serial.printf("Dose slots primed for today (yday=%d, now=%02d:%02d:%02d)\n",
-                t.tm_yday, t.tm_hour, t.tm_min, t.tm_sec);
+  Serial.printf("Dose slots primed for today (yday=%d, now=%02d:%02d:%02d)\n", t.tm_yday, t.tm_hour, t.tm_min, t.tm_sec);
 }
 
 
@@ -582,19 +637,21 @@ void updatePumpSchedules() {
   if(FLOW_KALK_ML_PER_MIN > 0 && DOSES_PER_DAY_KALK > 0){
     float secondsPerDay = (dosing.ml_per_day_kalk / FLOW_KALK_ML_PER_MIN) * 60.0f;
     SEC_PER_DOSE_KALK = secondsPerDay / DOSES_PER_DAY_KALK;
+    Serial.print("SEC_PER_DOSE_KALK updated to: "); Serial.println(SEC_PER_DOSE_KALK);
   }
 
   if(FLOW_AFR_ML_PER_MIN > 0 && DOSES_PER_DAY_AFR > 0){
     float secondsPerDay = (dosing.ml_per_day_afr / FLOW_AFR_ML_PER_MIN) * 60.0f;
     SEC_PER_DOSE_AFR = secondsPerDay / DOSES_PER_DAY_AFR;
+    Serial.print("SEC_PER_DOSE_AFR updated to: "); Serial.println(SEC_PER_DOSE_AFR);
   }
 
   if(FLOW_MG_ML_PER_MIN > 0 && DOSES_PER_DAY_MG > 0){
     float secondsPerDay = (dosing.ml_per_day_mg / FLOW_MG_ML_PER_MIN) * 60.0f;
     SEC_PER_DOSE_MG = secondsPerDay / DOSES_PER_DAY_MG;
+    Serial.print("SEC_PER_DOSE_MG updated to: "); Serial.println(SEC_PER_DOSE_MG);
   }
 }
-
 void pushHistory(const TestPoint& tp){
   if(historyCount < MAX_HISTORY){
     historyBuf[historyCount++] = tp;
@@ -1085,217 +1142,73 @@ void doseAndLog(int pumpIndex, const String& pumpName, int pin, float ml, float 
 
 
 void maybeDosePumpsRealTime() {
+  if (WiFi.status() != WL_CONNECTED) return;
   struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    // If we can't get time, don't dose
-    Serial.println("WARN: getLocalTime failed, skipping dosing.");
-    return;
-  }
-  // ---- UI-driven schedule window dosing ----
-  if (gSchedule.enabled) {
-    const int winMin = scheduleWindowMinutes(gSchedule);
-    const int intervals = scheduleIntervals(gSchedule);
-    if (winMin > 0 && intervals > 0) {
-      const int nowMin = nowMinutesOfDay(timeinfo);
+  if (!getLocalTime(&timeinfo)) return;
+  if (!isTimeValid(timeinfo)) return;
 
-      // New day? reset slot counter
-      if (timeinfo.tm_yday != lastSchedDay) {
-        lastSchedDay = timeinfo.tm_yday;
-        lastSchedSlot = -1;
-        schedPrimed = false;
-      }
+  // Determine which 'day' we are in for slot reset (handles wrap windows).
+  const int windowDay = doseScheduleCfg.enabled ? windowStartYday(timeinfo, doseScheduleCfg.startHour, doseScheduleCfg.endHour)
+                                         : timeinfo.tm_yday;
 
-      // Prime: mark current slot as already done so we don't "catch up" after reboot
-      if (!schedPrimed) {
-        lastSchedSlot = scheduleSlotIndex(gSchedule, nowMin);
-        if (lastSchedSlot < -1) lastSchedSlot = -1;
-        schedPrimed = true;
-        Serial.printf("Schedule primed (yday=%d, now=%02d:%02d, slot=%d)\n",
-                      timeinfo.tm_yday, timeinfo.tm_hour, timeinfo.tm_min, lastSchedSlot);
-        // Persist
-        dosingPrefs.begin("dosing", false);
-        dosingPrefs.putInt("sch_day", lastSchedDay);
-        dosingPrefs.putInt("sch_slot", lastSchedSlot);
-        dosingPrefs.end();
-        return; // wait until next interval boundary
-      }
-
-      // Only dose inside window
-      if (!scheduleInWindow(gSchedule, nowMin)) {
-        return;
-      }
-
-      const int slotIdx = scheduleSlotIndex(gSchedule, nowMin);
-      if (slotIdx <= lastSchedSlot) {
-        return; // already did this slot
-      }
-
-      // Compute ml per interval for each pump so full ml/day is delivered over the window
-      const float mlPerIntervalKalk = (dosing.ml_per_day_kalk > 0.0f) ? (dosing.ml_per_day_kalk / intervals) : 0.0f;
-      const float mlPerIntervalAfr  = (dosing.ml_per_day_afr  > 0.0f) ? (dosing.ml_per_day_afr  / intervals) : 0.0f;
-      const float mlPerIntervalMg   = (dosing.ml_per_day_mg   > 0.0f) ? (dosing.ml_per_day_mg   / intervals) : 0.0f;
-
-      Serial.printf("Schedule dose slot %d/%d (window=%dmin every=%dmin)\n",
-                    slotIdx, intervals, winMin, gSchedule.everyMin);
-
-      // Dose & log (source="schedule")
-      if (mlPerIntervalKalk > 0.0f) {
-        doseAndLog(1, "kalk", PIN_PUMP_KALK, mlPerIntervalKalk, FLOW_KALK_ML_PER_MIN, "schedule");
-      }
-      if (mlPerIntervalAfr > 0.0f) {
-        doseAndLog(2, "afr",  PIN_PUMP_AFR,  mlPerIntervalAfr,  FLOW_AFR_ML_PER_MIN,  "schedule");
-      }
-      if (mlPerIntervalMg > 0.0f) {
-        doseAndLog(3, "mg",   PIN_PUMP_MG,   mlPerIntervalMg,   FLOW_MG_ML_PER_MIN,   "schedule");
-      }
-
-      lastSchedSlot = slotIdx;
-
-      dosingPrefs.begin("dosing", false);
-      dosingPrefs.putInt("sch_day", lastSchedDay);
-      dosingPrefs.putInt("sch_slot", lastSchedSlot);
-      dosingPrefs.end();
-
-      return; // IMPORTANT: do not fall through to hardcoded slots
-    }
-  }
-
-
-  if (!isTimeValid(timeinfo)) {
-    Serial.println("WARN: time not valid yet (waiting for NTP); skipping dosing.");
-    return;
-  }
-
-  // One-time boot helper: prevent "catch-up" doses after reboot.
-  if (!doseSlotsPrimed) {
+  // Prime/reset slots when day/window changes
+  if (!doseSlotsPrimed || windowDay != lastDoseWindowDay) {
+    // rebuild slots from current config and prime
+    rebuildScheduleSlots();
+    for (int i = 0; i < DOSE_SLOTS_PER_DAY; i++) slotDone[i] = false;
+    doseSlotsPrimed = false;
     primeDoseSlotsForToday();
-    // If still not primed, just wait.
-    if (!doseSlotsPrimed) return;
   }
 
-int dayOfYear = timeinfo.tm_yday;   // 0..365
-  int hour      = timeinfo.tm_hour;   // 0..23
-  int minute    = timeinfo.tm_min;    // 0..59
-
-  // New day? Reset slot flags
-  if (dayOfYear != lastDoseDay) {
-    lastDoseDay = dayOfYear;
-    for (int i = 0; i < DOSE_SLOTS_PER_DAY; i++) {
-      slotDone[i] = false;
+  int nowIdx = -1;
+  if (doseScheduleCfg.enabled) {
+    nowIdx = scheduleSlotIndex(timeinfo, doseScheduleCfg.startHour, doseScheduleCfg.endHour, doseScheduleCfg.everyMin);
+    if (nowIdx < 0) return; // outside allowed window
+  } else {
+    // legacy window: determine last reached slot by time-of-day
+    for (int i = DOSE_SLOTS_PER_DAY - 1; i >= 0; i--) {
+      int sh = DOSE_HOURS[i];
+      int sm = DOSE_MINUTES[i];
+      bool reached = (timeinfo.tm_hour > sh) || (timeinfo.tm_hour == sh && timeinfo.tm_min >= sm);
+      if (reached) { nowIdx = i; break; }
     }
+    if (nowIdx < 0) return;
   }
 
-  // Precompute ml per dose for each pump
-  float mlPerDoseKalk = (DOSES_PER_DAY_KALK > 0) ? (dosing.ml_per_day_kalk / DOSES_PER_DAY_KALK) : 0.0f;
-  float mlPerDoseAfr  = (DOSES_PER_DAY_AFR  > 0) ? (dosing.ml_per_day_afr  / DOSES_PER_DAY_AFR ) : 0.0f;
-  float mlPerDoseMg   = (DOSES_PER_DAY_MG   > 0) ? (dosing.ml_per_day_mg   / DOSES_PER_DAY_MG  ) : 0.0f;
+  // Compute per-slot ml so the full daily volume is achieved by the end of the window.
+  const float kalkPerDose = dosing.ml_per_day_kalk / max(1, DOSE_SLOTS_PER_DAY);
+  const float afrPerDose  = dosing.ml_per_day_afr  / max(1, DOSE_SLOTS_PER_DAY);
+  const float mgPerDose   = dosing.ml_per_day_mg   / max(1, DOSE_SLOTS_PER_DAY);
 
-  String timeStr = getLocalTimeString();
-
-  // For each slot, if we are past the time and haven't dosed it yet, dose once.
-  for(int i = 0; i < DOSE_SLOTS_PER_DAY; i++){
+  for (int i = 0; i < nowIdx && i < DOSE_SLOTS_PER_DAY; i++) {
     if (slotDone[i]) continue;
 
-    int sh = DOSE_HOURS[i];
-    int sm = DOSE_MINUTES[i];
+    Serial.printf("Schedule dose slot %d/%d\n", i+1, DOSE_SLOTS_PER_DAY);
 
-    bool timeReached =
-      (hour > sh) || (hour == sh && minute >= sm);
-
-    if (timeReached) {
-      Serial.print("Dosing slot ");
-      Serial.println(i);
-
-      // --- Kalk dose & Firebase alert ---
-      if (SEC_PER_DOSE_KALK > 0.0f && mlPerDoseKalk > 0.0f) {
-        giveDose(PIN_PUMP_KALK, SEC_PER_DOSE_KALK);
-        /*firebasePushAlert("dose",
-                          "Kalk dose",
-                          String(mlPerDoseKalk, 1) + " ml",
-                          timeStr,
-                          "dose_kalk",
-                          30ULL*60ULL*1000ULL);*/
-      }
-
-      // --- AFR dose & IFTTT ---
-      if (SEC_PER_DOSE_AFR > 0.0f && mlPerDoseAfr > 0.0f) {
-        giveDose(PIN_PUMP_AFR, SEC_PER_DOSE_AFR);
-        /*firebasePushAlert("dose",
-                          "AllForReef dose",
-                          String(mlPerDoseAfr, 1) + " ml",
-                          timeStr,
-                          "dose_afr",
-                          30ULL*60ULL*1000ULL);*/
-      }
-
-      // --- Mg dose & Firebase alert ---
-      if (SEC_PER_DOSE_MG > 0.0f && mlPerDoseMg > 0.0f) {
-        giveDose(PIN_PUMP_MG, SEC_PER_DOSE_MG);
-        /*firebasePushAlert("dose",
-                          "Magnesium dose",
-                          String(mlPerDoseMg, 1) + " ml",
-                          timeStr,
-                          "dose_mg",
-                          30ULL*60ULL*1000ULL);*/
-      }
-
-      slotDone[i] = true;
+    // KALK
+    if (kalkPerDose > 0.0f && FLOW_KALK_ML_PER_MIN > 0.0f) {
+      float sec = (kalkPerDose / FLOW_KALK_ML_PER_MIN) * 60.0f;
+      giveDose(PIN_PUMP_KALK, sec);
+      firebaseLogDoseRun(1, "kalk", kalkPerDose, sec, FLOW_KALK_ML_PER_MIN, "schedule");
     }
+    // AFR
+    if (afrPerDose > 0.0f && FLOW_AFR_ML_PER_MIN > 0.0f) {
+      float sec = (afrPerDose / FLOW_AFR_ML_PER_MIN) * 60.0f;
+      giveDose(PIN_PUMP_AFR, sec);
+      firebaseLogDoseRun(2, "afr", afrPerDose, sec, FLOW_AFR_ML_PER_MIN, "schedule");
+    }
+    // MG
+    if (mgPerDose > 0.0f && FLOW_MG_ML_PER_MIN > 0.0f) {
+      float sec = (mgPerDose / FLOW_MG_ML_PER_MIN) * 60.0f;
+      giveDose(PIN_PUMP_MG, sec);
+      firebaseLogDoseRun(3, "mg", mgPerDose, sec, FLOW_MG_ML_PER_MIN, "schedule");
+    }
+
+    slotDone[i] = true;
+    lastDoseWindowDay = windowDay;
   }
 }
 
-
-// ===================== FIREBASE: Dose Schedule (settings/doseSchedule) =====================
-// Pull /devices/{DEVICE_ID}/settings/doseSchedule
-// Example: {"startHour":0,"endHour":9,"everyMin":15,"updatedAt":123}
-void firebaseSyncDoseScheduleOnce() {
-  const String path = "/devices/" + String(DEVICE_ID) + "/settings/doseSchedule";
-  String payload = firebaseGetJson(path);
-  if (payload.length() == 0 || payload == "null") {
-    // No schedule configured -> keep disabled (but don't spam logs)
-    gSchedule.enabled = false;
-    return;
-  }
-
-  StaticJsonDocument<256> doc;
-  DeserializationError err = deserializeJson(doc, payload);
-  if (err) {
-    Serial.println("DoseSchedule: JSON parse error, ignoring");
-    return;
-  }
-
-  // We accept schedule even if updatedAt missing; compare fields to detect changes.
-  int startHour = doc["startHour"] | gSchedule.startHour;
-  int endHour   = doc["endHour"]   | gSchedule.endHour;
-  int everyMin  = doc["everyMin"]  | gSchedule.everyMin;
-  uint64_t updatedAt = doc["updatedAt"] | 0ULL;
-
-  bool enabled = true;
-  if (startHour < 0 || startHour > 23) enabled = false;
-  if (endHour   < 0 || endHour   > 23) enabled = false;
-  if (!scheduleEveryMinValid(everyMin)) enabled = false;
-
-  // Detect change
-  bool changed =
-    (gSchedule.enabled != enabled) ||
-    (gSchedule.startHour != startHour) ||
-    (gSchedule.endHour != endHour) ||
-    (gSchedule.everyMin != everyMin);
-
-  gSchedule.startHour = startHour;
-  gSchedule.endHour   = endHour;
-  gSchedule.everyMin  = everyMin;
-  gSchedule.enabled   = enabled;
-  gSchedule.updatedAt = updatedAt;
-
-  if (changed) {
-    Serial.printf("DoseSchedule applied: start=%d end=%d every=%dmin (enabled=%s)\n",
-                  gSchedule.startHour, gSchedule.endHour, gSchedule.everyMin, gSchedule.enabled ? "true" : "false");
-    // Reset prime state so we don't accidentally catch-up on a new schedule
-    schedPrimed = false;
-    lastSchedSlot = -1;
-  }
-}
 
 // ===================== FIREBASE: resetAi COMMAND =====================
 
@@ -1430,6 +1343,78 @@ bool firebaseCheckAndHandleLiveDose() {
   return true;
 }
 
+void firebaseSyncTankSize() {
+  String path = "/devices/" + String(DEVICE_ID) + "/settings/tankSize";
+  String val = firebaseGetJson(path);
+
+  if (val != "" && val != "null") {
+    float gallons = val.toFloat();
+    if (gallons > 0) {
+      float newLiters = gallons * 3.78541f;
+      
+      if (abs(newLiters - TANK_VOLUME_L) > 0.1f) {
+        Serial.print("TANK UPDATE DETECTED! New Gallons: ");
+        Serial.println(gallons);
+
+        TANK_VOLUME_L = newLiters;
+
+        // Baseline is 300g (1135.6L)
+        float scaleFactor = 1135.6f / TANK_VOLUME_L;
+
+        // 1. Kalk Scaling
+        DKH_PER_ML_KALK_TANK    = 0.00010f * scaleFactor; 
+        CA_PPM_PER_ML_KALK_TANK = 0.00070f * scaleFactor;
+
+        // 2. AFR Scaling (Scaling all 3 impacts)
+        DKH_PER_ML_AFR_TANK     = 0.0052f  * scaleFactor; // Fixed typo (AF -> AFR)
+        CA_PPM_PER_ML_AFR_TANK  = 0.037f   * scaleFactor; // Added
+        MG_PPM_PER_ML_AFR_TANK  = 0.006f   * scaleFactor; // Added
+
+        // 3. Magnesium Pump Scaling
+        MG_PPM_PER_ML_MG_TANK   = 0.20f    * scaleFactor; // Added
+
+        updatePumpSchedules(); 
+      }
+    }
+  }
+}
+// Pull /settings/doseSchedule.json and apply changes.
+// Expected shape:
+// { "enabled": true, "startHour": 0, "endHour": 9, "everyMin": 15, "updatedAt": 1234567890 }
+void firebaseSyncDoseScheduleOnce() {
+  String path = "/devices/" + String(DEVICE_ID) + "/settings/doseSchedule.json";
+  String payload = firebaseGetJson(path);
+  if (payload.length() == 0 || payload == "null") return;
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) return;
+
+  bool enabled   = doc["enabled"]   | false;
+  int  startHour = doc["startHour"] | 0;
+  int  endHour   = doc["endHour"]   | 0;
+  int  everyMin  = doc["everyMin"]  | 60;
+  uint64_t updatedAt = doc["updatedAt"] | 0;
+
+  // Only apply if changed
+  static uint64_t lastAppliedUpdatedAt = 0;
+  if (updatedAt != 0 && updatedAt == lastAppliedUpdatedAt) return;
+
+  doseScheduleCfg.enabled = enabled;
+  doseScheduleCfg.startHour = clampInt(startHour, 0, 23);
+  doseScheduleCfg.endHour   = clampInt(endHour,   0, 23);
+  doseScheduleCfg.everyMin  = clampInt(everyMin,  1, 240);
+  doseScheduleCfg.updatedAt = updatedAt;
+
+  if (updatedAt != 0) lastAppliedUpdatedAt = updatedAt;
+
+  rebuildScheduleSlots();
+  doseSlotsPrimed = false;
+  primeDoseSlotsForToday();
+}
+
+
+
 
 
 // ===================== FIREBASE: CALIBRATE COMMAND =====================
@@ -1449,55 +1434,70 @@ int pumpNumToPin(int pump) {
 bool firebaseCheckAndHandleCalibrate() {
   if (WiFi.status() != WL_CONNECTED) return false;
 
-  const String path = "/devices/" + String(DEVICE_ID) + "/commands/calibrate";
+  String path = "/devices/" + String(DEVICE_ID) + "/commands/calibrate";
   String payload = firebaseGetJson(path);
   if (payload.length() == 0 || payload == "null") return false;
 
   Serial.print("calibrate payload: ");
   Serial.println(payload);
 
-  StaticJsonDocument<384> doc;
-  DeserializationError err = deserializeJson(doc, payload);
-  if (err) {
-    Serial.println("Calibrate: JSON parse error, ignoring");
-    return false;
-  }
+  // trigger
+  int trigIdx = payload.indexOf("\"trigger\"");
+  if (trigIdx < 0) return false;
+  int colonIdx = payload.indexOf(':', trigIdx);
+  if (colonIdx < 0) return false;
+  String valStr = payload.substring(colonIdx + 1);
+  valStr.trim();
+  bool trigger = valStr.startsWith("true");
 
-  // IMPORTANT: Only honor TOP-LEVEL trigger. This prevents accidental triggers if some other
-  // object (like liveDose) gets nested under calibrate in RTDB.
-  bool trigger = doc["trigger"] | false;
   if (!trigger) return false;
 
-  int pump = doc["pump"] | 1;
-  int durationSec = doc["durationSec"] | 60;
+  // pump number (default 1)
+  int pump = 1;
+  int pIdx = payload.indexOf("\"pump\"");
+  if (pIdx >= 0) {
+    int pColon = payload.indexOf(':', pIdx);
+    if (pColon >= 0) {
+      String pStr = payload.substring(pColon + 1);
+      pStr.trim();
+      pump = pStr.toInt();
+    }
+  }
 
-  if (pump < 1) pump = 1;
-  if (pump > 4) pump = 4;
-
-  if (durationSec <= 0) durationSec = 60;
-  if (durationSec > 300) durationSec = 300; // safety cap
+  // duration seconds (default 60)
+  int durationSec = 60;
+  int dIdx = payload.indexOf("\"durationSec\"");
+  if (dIdx >= 0) {
+    int dColon = payload.indexOf(':', dIdx);
+    if (dColon >= 0) {
+      String dStr = payload.substring(dColon + 1);
+      dStr.trim();
+      durationSec = dStr.toInt();
+      if (durationSec <= 0) durationSec = 60;
+      if (durationSec > 300) durationSec = 300; // safety cap
+    }
+  }
 
   int pin = pumpNumToPin(pump);
   if (pin < 0) {
-    Serial.println("Calibrate: invalid pump number, clearing trigger");
+    Serial.println("Calibrate: invalid pump number");
   } else {
-    Serial.printf("Calibrate: running pump %d on pin %d for %d sec...\n",
-                  pump, pin, durationSec);
-
+    Serial.printf("Calibrate: running pump %d on pin %d for %d sec...\n", pump, pin, durationSec);
     giveDose(pin, (float)durationSec);
-
     Serial.println("Calibrate: done.");
   }
 
-  // Clear trigger + record lastRun
-  StaticJsonDocument<192> out;
-  out["trigger"] = false;
-  out["lastRun"] = (unsigned long long)getEpochMillis();
-  out["pump"] = pump;
-  out["durationSec"] = durationSec;
+  // Clear trigger and write lastRun
+  time_t nowSec = time(NULL);
+  uint64_t tsMs = (nowSec > 0) ? (uint64_t)nowSec * 1000ULL : (uint64_t)millis();
 
-  String clearJson;
-  serializeJson(out, clearJson);
+  String clearJson = "{";
+  clearJson += "\"trigger\":false,";
+  clearJson += "\"lastRun\":" + String((unsigned long long)tsMs) + ",";
+  clearJson += "\"pump\":" + String(pump) + ",";
+  clearJson += "\"durationSec\":" + String(durationSec);
+  clearJson += "}";
+
   firebasePutJson(path, clearJson);
 
   return true;
@@ -1822,6 +1822,23 @@ void firebaseSendStateHeartbeat() {
   firebasePutJson(path, json);
 }
 
+// Remove the fixed values and use these formulas instead
+void updateChemistryConstants() {
+    if (TANK_VOLUME_L <= 0) return;
+
+    // Saturated Kalk: ~1.4 dKH per Liter. 
+    // Formulas: (Source Strength / Tank Volume)
+    DKH_PER_ML_KALK_TANK    = 1.4f / TANK_VOLUME_L; 
+    CA_PPM_PER_ML_KALK_TANK = 10.0f / TANK_VOLUME_L; // ~10ppm Ca per Liter
+
+    // All-For-Reef: 160 dKH per Liter (approx)
+    DKH_PER_ML_AFR_TANK     = 160.0f / TANK_VOLUME_L;
+    CA_PPM_PER_ML_AFR_TANK  = 1140.0f / TANK_VOLUME_L;
+    MG_PPM_PER_ML_AFR_TANK  = 180.0f / TANK_VOLUME_L;
+
+    Serial.printf("AI Math Updated: 1ml Kalk = %.6f dKH | 1ml AFR = %.6f dKH\n", 
+                  DKH_PER_ML_KALK_TANK, DKH_PER_ML_AFR_TANK);
+}
 
 // ===================== HTTP HANDLERS (local debug/legacy) =====================
 
@@ -1874,6 +1891,21 @@ void handleApiHistory(){
   server.send(200, "application/json", json);
 }
 
+void updateChemistryMath() {
+    // If volume is 0, default to 300g (1135.6L) to prevent math errors
+    if (TANK_VOLUME_L <= 0) TANK_VOLUME_L = 1135.6f;
+
+    // This creates a ratio: (Original 300g size / New size)
+    // If the tank gets smaller, this number gets larger, making the chemicals more "potent"
+    float scaleFactor = 1135.6f / TANK_VOLUME_L;
+
+    // Update your global chemistry variables based on the new size
+    DKH_PER_ML_KALK_TANK    = 0.0103f * scaleFactor; 
+    CA_PPM_PER_ML_KALK_TANK = 0.0720f * scaleFactor;
+    DKH_PER_ML_AFR_TANK     = 0.0052f * scaleFactor;
+
+    Serial.printf("Tank updated to %.1fL. New Kalk impact: %.6f dKH/ml\n", TANK_VOLUME_L, DKH_PER_ML_KALK_TANK);
+}
 
 // ===================== SETUP & LOOP =====================
 
@@ -1892,14 +1924,6 @@ void setup(){
 
   // Load last saved AI dosing plan from NVS (if any)
   loadDosingFromPrefs();
-
-  // Load schedule progress (prevents catch-up after reboot)
-  if (dosingPrefs.begin("dosing", true)) {
-    lastSchedDay = dosingPrefs.getInt("sch_day", -1);
-    lastSchedSlot = dosingPrefs.getInt("sch_slot", -1);
-    dosingPrefs.end();
-  }
-
   loadFlowFromPrefs();
   // Sanity-check stored flow rates (bad values can cause hour-long pump runs)
 validateFlow("KALK", FLOW_KALK_ML_PER_MIN, 675.0f);
@@ -1998,7 +2022,9 @@ void loop(){
     firebaseCheckAndHandleOtaRequest();
     firebaseCheckAndHandleCalibrate();
     firebaseSyncDoseScheduleOnce();
+    firebaseSyncTankSize();
   }
+  
 
   // Periodically pull calibration values (ml/min) from RTDB (so ESP32 uses what you saved in UI)
   static unsigned long lastFlowSyncMs = 0;

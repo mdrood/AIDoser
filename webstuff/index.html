@@ -156,7 +156,6 @@
 
   code { background: rgba(0,0,0,0.35); padding: 2px 6px; border-radius: 8px; }
 
-/* ---- Active Plan + Schedule side-by-side ---- */
 .plan-grid{
   grid-column: 1 / -1;
   display:grid;
@@ -164,10 +163,8 @@
   gap:16px;
   align-items:stretch;
 }
-.plan-grid .card{height:100%;}
 @media (max-width: 900px){
-  .plan-grid{
-  grid-column: 1 / -1;grid-template-columns:1fr;}
+  .plan-grid{grid-template-columns:1fr;}
 }
 
 </style>
@@ -192,12 +189,12 @@
       <header>
         <div class="header-left">
           <div class="reef-icon"><div class="reef-icon-wave"></div></div>
-          <div>
-            <h1 style="margin:0; font-size: 2rem; letter-spacing: -1px;">
-              Reef<span style="color:var(--accent)">AI</span>
-            </h1>
-            <div class="pill">300 Gallon System</div>
-          </div>
+<div style="display: flex; align-items: center; gap: 8px;">
+  <input id="tankSizeInput" type="number" 
+         style="width: 80px; padding: 4px 8px; font-size: 0.8rem; margin: 0; text-align: center;" 
+         placeholder="Gallons">
+  <span style="font-size: 0.8rem; color: var(--accent);">Gallons</span>
+</div>
         </div>
 
         <div style="display:flex; gap: 12px; flex-wrap: wrap; justify-content: flex-end;">
@@ -228,86 +225,60 @@
           </form>
         </div>
 
-
-        <div class="card">
-          <h3 style="color:var(--accent); margin-top:0;">Live Dose</h3>
-          <div class="muted">Send a one-time dose command to the ESP32 via <code>commands/liveDose</code>. It will run the pump and log to dosing history.</div>
-
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px;">
-            <div>
-              <label>Pump</label>
-              <select id="liveDosePump">
-                <option value="1">Pump 1 (Kalk)</option>
-                <option value="2">Pump 2 (AFR)</option>
-                <option value="3">Pump 3 (Mag)</option>
-                <option value="4">Pump 4 (Aux)</option>
-              </select>
-            </div>
-            <div>
-              <label>mL</label>
-              <input id="liveDoseMl" type="number" step="0.1" min="0" placeholder="eg. 10">
-            </div>
-          </div>
-
-          <button id="liveDoseBtn" class="btn-action">Run Live Dose</button>
-          <div style="margin-top:10px;">
-            <span class="pill" id="liveDoseStatus" style="border-color: rgba(56,189,248,0.35); color: var(--text-soft);">—</span>
-          </div>
-        </div>
-
-<div class="plan-grid">
+        <div class="plan-grid">
 <div class="card">
           <h3 style="color:var(--accent); margin-top:0;">Active Dosing Plan</h3>
           <div id="dosingContainer" style="display:flex; flex-direction: column; gap: 10px;"></div>
-          <p style="font-size: 0.75rem; color: var(--text-soft); margin-top: 25px; line-height: 1.5;">
-            Calculated volumes are automatically spread across 24 dosing windows based on your reef's consumption.
-          </p>
         </div>
-<div class="card">
-          <h3 style="color:var(--accent); margin-top:0;">Dosing Schedule</h3>
-          <div class="muted">
-            Choose when the ESP32 is allowed to dose and how often. The ESP32 will automatically split each pump's <b>ml/day</b>
-            across the dosing intervals inside the window.
-          </div>
 
-          <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px;">
-            <div>
-              <label>Start hour</label>
-              <select id="schedStart"></select>
-            </div>
-            <div>
-              <label>End hour</label>
-              <select id="schedEnd"></select>
-            </div>
-            <div>
-              <label>Interval</label>
-              <select id="schedEvery">
-                <option value="15">Every 15 minutes</option>
-                <option value="60">Every 1 hour</option>
-                <option value="120">Every 2 hours</option>
-                <option value="240">Every 4 hours</option>
-              </select>
-            </div>
-          </div>
+        <div class="card">
+  <h3 style="color:var(--accent); margin-top:0;">Dosing Schedule</h3>
 
-          <div style="display:flex; gap: 10px; align-items:center; flex-wrap:wrap; margin-top: 14px;">
-            <button id="schedSaveBtn" class="btn-action">Save Schedule</button>
-            <span class="pill" id="schedStatus" style="border-color: rgba(56,189,248,0.35); color: var(--text-soft);">—</span>
-          </div>
+  <div class="two-col" style="gap:12px;">
+    <div>
+      <label style="display:flex; align-items:center; gap:10px;">
+        <input id="schedEnabled" type="checkbox" style="width:auto; transform: translateY(1px);" />
+        <span>Enable scheduled dosing</span>
+      </label>
+      <p style="margin:6px 0 0; font-size:.78rem; color:var(--text-soft); line-height:1.4;">
+        The ESP32 will spread each pump’s daily mL across the dosing window.
+      </p>
+    </div>
+    <div class="tag" style="justify-content:flex-start;">
+      <div class="tag-dot"></div>
+      <span id="schedSummary">Loading…</span>
+    </div>
+  </div>
 
-          <div class="muted" style="margin-top:10px;">
-            Saved to <code>devices/&lt;deviceId&gt;/settings/doseSchedule</code> as:
-            <code>{ startHour, endHour, everyMin }</code>.
-          </div>
-        </div>
+  <div class="two-col" style="margin-top:12px; gap:12px;">
+    <div>
+      <label>Start hour</label>
+      <select id="schedStart"></select>
+    </div>
+    <div>
+      <label>End hour</label>
+      <select id="schedEnd"></select>
+    </div>
+    <div>
+      <label>Interval</label>
+      <select id="schedEvery">
+        <option value="15">Every 15 minutes</option>
+        <option value="60">Every 1 hour</option>
+        <option value="120">Every 2 hours</option>
+        <option value="240">Every 4 hours</option>
+      </select>
+    </div>
+    <div>
+      <label>Status</label>
+      <div class="tag" style="justify-content:flex-start;">
+        <div id="schedDot" class="tag-dot" style="background: rgba(148,163,184,.6); box-shadow:none;"></div>
+        <span id="schedStatus">Idle</span>
+      </div>
+    </div>
+  </div>
+<p style="font-size: 0.75rem; color: var(--text-soft); margin-top: 10px; line-height: 1.5;">Calculated volumes are automatically spread across 24 dosing windows based on your reef\'s consumption.</p>
 </div>
-
-
-          <div class="muted" id="liveDoseLast" style="margin-top:6px;">Last: —</div>
-
-        
-
-        
+        </div>
 
       </div>
 
@@ -399,10 +370,7 @@
         </div>
       </div>
 
-      
-
-
-<div class="card">
+      <div class="card">
         <div style="height:360px;"><canvas id="doseChart"></canvas></div>
 
         <div class="muted" style="margin-top:10px;">
@@ -460,18 +428,37 @@
     };
     document.getElementById('logoutBtn').onclick = () => auth.signOut();
 
-    auth.onAuthStateChanged(user => {
+auth.onAuthStateChanged(user => {
       if (user) {
         document.getElementById('loginModal').classList.add('hidden');
         db.ref(`users/${user.uid}/devices`).once('value', snap => {
           if (snap.exists()) {
-            const devMap = snap.val() || {};
-            const ids = Object.keys(devMap);
-            // Prefer reefDoser6 if present, otherwise first device
-            activeDeviceId = ids.includes("reefDoser6") ? "reefDoser6" : (ids[0] || null);
+            activeDeviceId = Object.keys(snap.val())[0];
 
             const devPill = document.getElementById('deviceIdPill');
             if (devPill) devPill.innerText = "Device: " + activeDeviceId;
+
+            // --- TANK SIZE SYNC LOGIC (MOVED HERE) ---
+            const tankSizeRef = db.ref(`devices/${activeDeviceId}/settings/tankSize`);
+            
+            // Listen for changes from DB (updates the box if changed elsewhere)
+            tankSizeRef.on('value', (snapshot) => {
+              const val = snapshot.val();
+              if (val) document.getElementById('tankSizeInput').value = val;
+            });
+
+            // Save to DB when you change the number in the box
+            document.getElementById('tankSizeInput').onchange = async (e) => {
+              const newSize = parseFloat(e.target.value);
+              if (isNaN(newSize) || newSize <= 0) return;
+              try {
+                await tankSizeRef.set(newSize);
+                console.log("Tank size saved to Firebase:", newSize);
+              } catch (err) {
+                console.error("Firebase Write Error:", err);
+                alert("Database write failed. Check permissions.");
+              }
+            };
 
             initApp();
           }
@@ -482,7 +469,129 @@
       }
     });
 
-    function initApp() {
+    
+// ---------------- Dosing Schedule (settings/doseSchedule) ----------------
+function _fmtHour(h){
+  const hr = ((h % 24) + 24) % 24;
+  const ampm = hr >= 12 ? "PM" : "AM";
+  const hr12 = (hr % 12) === 0 ? 12 : (hr % 12);
+  return `${hr12}:00 ${ampm}`;
+}
+
+function _setSchedDot(state){
+  const dot = document.getElementById("schedDot");
+  if(!dot) return;
+  if(state === "dirty"){
+    dot.style.background = "rgba(250,204,21,.85)";
+    dot.style.boxShadow = "0 0 10px rgba(250,204,21,.35)";
+  } else if(state === "ok"){
+    dot.style.background = "rgba(74,222,128,.9)";
+    dot.style.boxShadow = "0 0 10px rgba(74,222,128,.35)";
+  } else if(state === "bad"){
+    dot.style.background = "rgba(248,113,113,.9)";
+    dot.style.boxShadow = "0 0 10px rgba(248,113,113,.35)";
+  } else {
+    dot.style.background = "rgba(148,163,184,.6)";
+    dot.style.boxShadow = "none";
+  }
+}
+
+function initDoseScheduleUI(){
+  const elEnabled = document.getElementById("schedEnabled");
+  const elStart = document.getElementById("schedStart");
+  const elEnd = document.getElementById("schedEnd");
+  const elEvery = document.getElementById("schedEvery");
+  const elStatus = document.getElementById("schedStatus");
+  const elSummary = document.getElementById("schedSummary");
+
+  // if schedule card not on this page, do nothing
+  if(!elEnabled || !elStart || !elEnd || !elEvery) return;
+  if(!db || !activeDeviceId) return;
+
+  // populate hours once
+  if(elStart.options.length === 0){
+    for(let h=0; h<24; h++){
+      const o1 = document.createElement("option");
+      o1.value = String(h);
+      o1.textContent = _fmtHour(h);
+      elStart.appendChild(o1);
+
+      const o2 = document.createElement("option");
+      o2.value = String(h);
+      o2.textContent = _fmtHour(h);
+      elEnd.appendChild(o2);
+    }
+  }
+
+  const ref = db.ref(`devices/${activeDeviceId}/settings/doseSchedule`);
+
+  // live load
+  ref.off();
+  ref.on("value", snap => {
+    const v = snap.val() || {};
+    const enabled = v.enabled === true || v.enabled === "true" || v.enabled === 1 || v.enabled === "1";
+    const startHour = (v.startHour ?? 0);
+    const endHour = (v.endHour ?? 9);
+    const everyMin = (v.everyMin ?? 15);
+
+    // Don't stomp while user is editing
+    if(document.activeElement !== elStart) elStart.value = String(startHour);
+    if(document.activeElement !== elEnd) elEnd.value = String(endHour);
+    if(document.activeElement !== elEvery) elEvery.value = String(everyMin);
+    if(document.activeElement !== elEnabled) elEnabled.checked = enabled;
+
+    const windowText = `${_fmtHour(Number(startHour))} → ${_fmtHour(Number(endHour))}`;
+    const everyText = everyMin === 15 ? "15 min" : everyMin === 60 ? "1 hr" : everyMin === 120 ? "2 hr" : `${everyMin/60} hr`;
+    if(elSummary) elSummary.textContent = `${enabled ? "Enabled" : "Disabled"} • ${windowText} • Every ${everyText}`;
+
+    _setSchedDot("ok");
+    if(elStatus) elStatus.textContent = "Synced";
+  });
+
+  let t = null;
+  const save = async () => {
+    const startHour = Number(elStart.value);
+    const endHour = Number(elEnd.value);
+    const everyMin = Number(elEvery.value);
+    const enabled = !!elEnabled.checked;
+
+    // basic validation
+    if(!isFinite(startHour) || startHour<0 || startHour>23) { _setSchedDot("bad"); elStatus.textContent="Invalid start"; return; }
+    if(!isFinite(endHour) || endHour<0 || endHour>23) { _setSchedDot("bad"); elStatus.textContent="Invalid end"; return; }
+    if(![15,60,120,240].includes(everyMin)) { _setSchedDot("bad"); elStatus.textContent="Invalid interval"; return; }
+
+    try{
+      await ref.set({
+        enabled,
+        startHour,
+        endHour,
+        everyMin,
+        updatedAt: firebase.database.ServerValue.TIMESTAMP
+      });
+      _setSchedDot("ok");
+      if(elStatus) elStatus.textContent = "Saved";
+    }catch(e){
+      console.error("doseSchedule save failed", e);
+      _setSchedDot("bad");
+      if(elStatus) elStatus.textContent = "Save failed";
+    }
+  };
+
+  const scheduleSave = () => {
+    _setSchedDot("dirty");
+    if(elStatus) elStatus.textContent = "Saving…";
+    if(t) clearTimeout(t);
+    t = setTimeout(save, 500);
+  };
+
+  elEnabled.addEventListener("change", save);
+  elStart.addEventListener("change", scheduleSave);
+  elEnd.addEventListener("change", scheduleSave);
+  elEvery.addEventListener("change", scheduleSave);
+}
+
+function initApp() {
+      initDoseScheduleUI();
       // dosing plan pills
       db.ref(`devices/${activeDeviceId}/dosingPlan`).on('value', s => {
         const plan = s.val() || {};
@@ -522,9 +631,6 @@
       });
 
       setupCalibrationUI();
-      
-      setupScheduleUI();
-setupLiveDoseUI();
     }
 
     // ---- OTA trigger ----
@@ -542,11 +648,10 @@ setupLiveDoseUI();
       const hostingUrl = `https://aidoser.web.app/devices/${activeDeviceId}/firmware.bin`;
 
       db.ref(`devices/${activeDeviceId}/otaRequest`).set({
-  trigger: true,
-  fileName: "firmware.bin",
-  url: hostingUrl,
-  requestedAt: firebase.database.ServerValue.TIMESTAMP
-}).then(() => {
+        fileName: "firmware.bin",
+        url: hostingUrl,
+        requestedAt: firebase.database.ServerValue.TIMESTAMP
+      }).then(() => {
         status.innerText = "OTA Request Sent. ESP32 will pull from Hosting.";
       }).catch(err => {
         status.innerText = "Error: " + err.message;
@@ -626,189 +731,6 @@ setupLiveDoseUI();
     };
 
     // ---- CALIBRATION ----
-
-    // ---- LIVE DOSE (Finish A) ----
-    function setupLiveDoseUI() {
-      const btn = document.getElementById('liveDoseBtn');
-      const pumpSel = document.getElementById('liveDosePump');
-      const mlInput = document.getElementById('liveDoseMl');
-      const statusEl = document.getElementById('liveDoseStatus');
-      const lastEl = document.getElementById('liveDoseLast');
-
-      function setStatus(text, tone) {
-        if (!statusEl) return;
-        statusEl.innerText = text || "—";
-        // tone: ok | bad | info
-        if (tone === "ok") {
-          statusEl.style.borderColor = "rgba(74,222,128,0.55)";
-          statusEl.style.color = "#bbf7d0";
-        } else if (tone === "bad") {
-          statusEl.style.borderColor = "rgba(249,115,115,0.55)";
-          statusEl.style.color = "#fecaca";
-        } else {
-          statusEl.style.borderColor = "rgba(56,189,248,0.35)";
-          statusEl.style.color = "var(--text-soft)";
-        }
-      }
-
-      if (!btn || !pumpSel || !mlInput) return;
-
-      
-// Watch the command node for progress/completion (ESP32 will set trigger:false and lastRun)
-const cmdRef = db.ref(`devices/${activeDeviceId}/commands/liveDose`);
-cmdRef.off(); // avoid duplicate listeners if initApp re-runs
-cmdRef.on('value', snap => {
-  const v = snap.val() || {};
-  if (v.trigger === true) {
-    setStatus("Running…", "info");
-  } else if (v.lastRun) {
-    const when = new Date(v.lastRun).toLocaleString();
-    setStatus(`✅ Complete (logged) • ${when}`, "ok");
-  } else {
-    setStatus("—", "info");
-  }
-});
-
-// Show last logged dose run (reads from devices/<id>/doseRuns)
-if (lastEl) {
-  const lastRef = db.ref(`devices/${activeDeviceId}/doseRuns`).limitToLast(1);
-  lastRef.off();
-  lastRef.on('value', snap => {
-    const obj = snap.val() || {};
-    const keys = Object.keys(obj);
-    if (!keys.length) { lastEl.textContent = "Last: —"; return; }
-    const r = obj[keys[0]] || {};
-    const ts = r.ts || r.timestamp || r.time || 0;
-    const pump = (r.pump || r.pumpName || r.type || "—");
-    const ml = (typeof r.ml === "number") ? r.ml : Number(r.ml);
-    const when = ts ? new Date(Number(ts)).toLocaleString() : "—";
-    const mlText = isFinite(ml) ? ml.toFixed(1) + " mL" : "—";
-    lastEl.textContent = `Last: ${pump} • ${mlText} • ${when}`;
-  });
-}
-
-      btn.onclick = async () => {
-        const pump = parseInt(pumpSel.value, 10);
-        const ml = parseFloat(mlInput.value);
-        if (!pump || pump < 1 || pump > 4) return setStatus("Pick a pump (1–4).", "bad");
-        if (!isFinite(ml) || ml <= 0) return setStatus("Enter a valid mL amount.", "bad");
-
-        btn.disabled = true;
-        setStatus("Queued…", "info");
-
-        const reqId = "live_" + Date.now();
-        try {
-          await db.ref(`devices/${activeDeviceId}/commands/liveDose`).set({
-            trigger: true,
-            status: "pending",
-            reqId,
-            pump,
-            ml,
-            requestedAt: firebase.database.ServerValue.TIMESTAMP
-          });
-          // ESP32 will flip trigger:false and write lastRun; listener above updates status
-        } catch (e) {
-          setStatus("Error: " + (e.message || e), "bad");
-        } finally {
-          btn.disabled = false;
-        }
-      };
-    }
-
-    // ---- DOSING SCHEDULE (UI -> RTDB settings/doseSchedule) ----
-    function hourLabel(h) {
-      const hh = Number(h) % 24;
-      const ampm = hh < 12 ? "AM" : "PM";
-      const h12 = (hh % 12) === 0 ? 12 : (hh % 12);
-      return `${h12}:00 ${ampm}`;
-    }
-
-    function fillHourSelect(sel) {
-      if (!sel) return;
-      sel.innerHTML = "";
-      for (let h = 0; h < 24; h++) {
-        const opt = document.createElement("option");
-        opt.value = String(h);
-        opt.textContent = hourLabel(h);
-        sel.appendChild(opt);
-      }
-    }
-
-    function setupScheduleUI() {
-      const startSel = document.getElementById("schedStart");
-      const endSel   = document.getElementById("schedEnd");
-      const everySel = document.getElementById("schedEvery");
-      const saveBtn  = document.getElementById("schedSaveBtn");
-      const statusEl = document.getElementById("schedStatus");
-
-      if (!startSel || !endSel || !everySel || !saveBtn) return;
-
-      fillHourSelect(startSel);
-      fillHourSelect(endSel);
-
-      const setStatus = (text, tone) => {
-        if (!statusEl) return;
-        statusEl.innerText = text || "—";
-        if (tone === "ok") {
-          statusEl.style.borderColor = "rgba(74,222,128,0.55)";
-          statusEl.style.color = "#bbf7d0";
-        } else if (tone === "bad") {
-          statusEl.style.borderColor = "rgba(249,115,115,0.55)";
-          statusEl.style.color = "#fecaca";
-        } else {
-          statusEl.style.borderColor = "rgba(56,189,248,0.35)";
-          statusEl.style.color = "var(--text-soft)";
-        }
-      };
-
-      // Live-load current schedule
-      const ref = db.ref(`devices/${activeDeviceId}/settings/doseSchedule`);
-      ref.off();
-      ref.on("value", snap => {
-        const v = snap.val() || {};
-        const startHour = (v.startHour ?? 0);
-        const endHour   = (v.endHour   ?? 24); // allow 24 meaning midnight/end-of-day
-        const everyMin  = (v.everyMin  ?? 60);
-
-        // endHour might be 24; map to 0 in UI label, but keep 24 in DB if user selects midnight end.
-        startSel.value = String(Number(startHour) % 24);
-        endSel.value   = String(Number(endHour) % 24);
-        everySel.value = String(Number(everyMin));
-
-        // Nice summary
-        setStatus(`Loaded: ${hourLabel(startSel.value)} → ${hourLabel(endSel.value)} • every ${everySel.value}m`, "info");
-      });
-
-      // Save
-      saveBtn.onclick = async () => {
-        try {
-          saveBtn.disabled = true;
-          setStatus("Saving…", "info");
-
-          const startHour = Number(startSel.value);
-          const endHour   = Number(endSel.value);
-          const everyMin  = Number(everySel.value);
-
-          if (!isFinite(startHour) || startHour < 0 || startHour > 23) return setStatus("Start hour invalid", "bad");
-          if (!isFinite(endHour)   || endHour   < 0 || endHour   > 23) return setStatus("End hour invalid", "bad");
-          if (![15,60,120,240].includes(everyMin)) return setStatus("Interval invalid", "bad");
-
-          await db.ref(`devices/${activeDeviceId}/settings/doseSchedule`).set({
-            startHour,
-            endHour,
-            everyMin,
-            updatedAt: firebase.database.ServerValue.TIMESTAMP
-          });
-
-          setStatus("✅ Saved. ESP32 will apply within a few seconds.", "ok");
-        } catch (e) {
-          setStatus("Error: " + (e.message || e), "bad");
-        } finally {
-          saveBtn.disabled = false;
-        }
-      };
-    }
-
     function setupCalibrationUI() {
       const names = ["Kalkwasser (P1)", "All-For-Reef (P2)", "Magnesium (P3)", "Auxiliary (P4)"];
       const grid = document.getElementById('calGrid');
@@ -874,44 +796,13 @@ if (lastEl) {
       });
     }
 
-    
-let calPumpsUnsub = null;
-function attachCalibrationPumpsListener() {
-  if (!activeDeviceId) return;
-  if (calPumpsUnsub) { try { calPumpsUnsub(); } catch(e){} calPumpsUnsub = null; }
-
-  const ref = db.ref(`devices/${activeDeviceId}/calibration/pumps`);
-  const handler = (snap) => {
-    const v = snap.val() || {};
-    for (let n = 1; n <= 4; n++) {
-      const st = document.getElementById(`calStatus${n}`);
-      if (!st) continue;
-      const rec = v[`pump${n}`] || {};
-      const mlpm = rec.ml_per_min ?? rec.mlPerMin ?? rec.flowMlPerMin;
-      if (mlpm && isFinite(Number(mlpm))) {
-        // Only show "Saved" hint if user isn't currently seeing a success/fail message
-        if (!st.innerText || st.innerText.startsWith("Saving") || st.innerText.startsWith("✅") || st.innerText.startsWith("❌")) {
-          // keep current message
-        } else {
-          st.innerText = `Saved: ${Number(mlpm).toFixed(1)} ml/min (from ${rec.ml_caught ?? "?"} ml in ${rec.durationSec ?? 60}s)`;
-        }
-      } else {
-        if (!st.innerText) st.innerText = "No saved calibration yet.";
-      }
-    }
-  };
-  ref.on('value', handler);
-  calPumpsUnsub = () => ref.off('value', handler);
-}
-
-let calStatusUnsub = null;
+    let calStatusUnsub = null;
     function attachCalibrationStatusListener() {
       if (!activeDeviceId) return;
       const ackEl = document.getElementById('calibrationAck');
       if (!ackEl) return;
 
       if (calStatusUnsub) { try { calStatusUnsub(); } catch(e){} calStatusUnsub = null; }
-      if (calPumpsUnsub) { try { calPumpsUnsub(); } catch(e){} calPumpsUnsub = null; }
 
       const ref = db.ref(`devices/${activeDeviceId}/calibration/status`);
       const handler = (snap) => {
@@ -932,12 +823,10 @@ let calStatusUnsub = null;
     document.getElementById('openCalibrationBtn').onclick = () => {
       document.getElementById('calibrationOverlay').classList.remove('hidden');
       attachCalibrationStatusListener();
-      attachCalibrationPumpsListener();
     };
     document.getElementById('closeCalibrationBtn').onclick = () => {
       document.getElementById('calibrationOverlay').classList.add('hidden');
       if (calStatusUnsub) { try { calStatusUnsub(); } catch(e){} calStatusUnsub = null; }
-      if (calPumpsUnsub) { try { calPumpsUnsub(); } catch(e){} calPumpsUnsub = null; }
     };
 
     // ---- DOSE RUNS / GRAPH (NEW) ----
@@ -1113,6 +1002,26 @@ let calStatusUnsub = null;
         alert("Push failed: " + err.message);
       }
     }
+
+    // Load tank size on startup
+const tankSizeRef = db.ref(`devices/${activeDeviceId}/settings/tankSize`);
+tankSizeRef.on('value', (snapshot) => {
+  const val = snapshot.val();
+  if (val) document.getElementById('tankSizeInput').value = val;
+});
+
+// Save tank size on change (when user hits enter or clicks away)
+document.getElementById('tankSizeInput').addEventListener('change', async (e) => {
+  const newSize = parseFloat(e.target.value);
+  if (isNaN(newSize) || newSize <= 0) return;
+  
+  try {
+    await tankSizeRef.set(newSize);
+    console.log("Tank size updated:", newSize);
+  } catch (err) {
+    alert("Failed to update tank size: " + err.message);
+  }
+});
 
     document.getElementById("enablePushBtn").addEventListener("click", enableIphonePush);
   </script>
