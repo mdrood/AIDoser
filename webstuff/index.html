@@ -68,6 +68,30 @@
     font-weight: 600;
   }
 
+/* Emergency Stop Button Styling */
+.btn-emergency {
+  background: linear-gradient(135deg, #f97373, #b91c1c);
+  color: #fff;
+  border: 2px solid rgba(255,255,255,0.2);
+  padding: 15px 30px;
+  font-size: 1.1rem;
+  box-shadow: 0 0 20px rgba(249, 115, 115, 0.4);
+  animation: pulse-red 2s infinite;
+}
+
+.btn-emergency.active {
+  background: #4ade80; /* Changes to green to 'Reset' the stop */
+  box-shadow: 0 0 20px rgba(74, 222, 128, 0.4);
+  animation: none;
+}
+
+@keyframes pulse-red {
+  0% { box-shadow: 0 0 0 0px rgba(249, 115, 115, 0.7); }
+  70% { box-shadow: 0 0 0 15px rgba(249, 115, 115, 0); }
+  100% { box-shadow: 0 0 0 0px rgba(249, 115, 115, 0); }
+}
+
+
   .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 25px; margin-bottom: 25px; }
   .card {
     border-radius: 16px;
@@ -156,6 +180,28 @@
 
   code { background: rgba(0,0,0,0.35); padding: 2px 6px; border-radius: 8px; }
 
+  .hidden { display: none !important; }
+
+.btn-emergency {
+  background: linear-gradient(135deg, #f97373, #b91c1c);
+  color: #fff;
+  border: 2px solid rgba(255,255,255,0.2);
+  padding: 10px 20px;
+  font-weight: 800;
+  border-radius: 999px;
+  animation: pulse-red 2s infinite;
+  cursor: pointer;
+}
+.btn-emergency.active {
+  background: linear-gradient(135deg, #4ade80, #166534);
+  animation: none;
+}
+@keyframes pulse-red {
+  0% { box-shadow: 0 0 0 0px rgba(249, 115, 115, 0.7); }
+  70% { box-shadow: 0 0 0 15px rgba(249, 115, 115, 0); }
+  100% { box-shadow: 0 0 0 0px rgba(249, 115, 115, 0); }
+}
+
 .plan-grid{
   grid-column: 1 / -1;
   display:grid;
@@ -186,23 +232,22 @@
   <div class="shell">
     <div class="glass-panel">
 
-      <header>
-        <div class="header-left">
-          <div class="reef-icon"><div class="reef-icon-wave"></div></div>
-<div style="display: flex; align-items: center; gap: 8px;">
-  <input id="tankSizeInput" type="number" 
-         style="width: 80px; padding: 4px 8px; font-size: 0.8rem; margin: 0; text-align: center;" 
-         placeholder="Gallons">
-  <span style="font-size: 0.8rem; color: var(--accent);">Gallons</span>
-</div>
-        </div>
+<header>
+  <div class="header-left">
+    <div class="reef-icon"><div class="reef-icon-wave"></div></div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <input id="tankSizeInput" type="number" style="width: 80px; text-align: center;" placeholder="Gallons">
+      <span style="font-size: 0.8rem; color: var(--accent);">Gallons</span>
+    </div>
+  </div>
+  <div style="display:flex; gap: 12px; align-items: center;">
+    <button id="openDoseGraphBtn" class="btn-outline-soft">📊 Dosing History</button>
+    <button id="openCalibrationBtn" class="btn-outline-soft">🧪 Calibrate</button>
 
-        <div style="display:flex; gap: 12px; flex-wrap: wrap; justify-content: flex-end;">
-          <button id="openDoseGraphBtn" class="btn-outline-soft" style="border-color: var(--accent); color: var(--accent);">Dosing History</button>
-          <button id="openCalibrationBtn" class="btn-outline-soft" style="border-color: var(--accent); color: var(--accent);">Pump Calibration</button>
-          <button id="logoutBtn" class="btn-outline-soft" style="color:var(--danger); border-color: rgba(249,115,115,0.3);">Logout</button>
-        </div>
-      </header>
+    <button id="eStopBtn" class="btn-emergency">🛑 EMERGENCY STOP</button>
+    <button id="logoutBtn" class="btn-outline-soft" style="color:var(--danger);">Logout</button>
+  </div>
+</header>
       <!-- PARAMETER CHART -->
       <div class="card" style="margin-bottom: 25px;">
         <h3 style="color:var(--accent); margin-top:0;">Parameter Trends</h3>
@@ -292,6 +337,10 @@
               <div class="tag-dot" style="background:#f97373; box-shadow: 0 0 10px rgba(249,115,115,0.7);"></div>Offline
             </div>
             <div id="firmwareInfo" class="tag" style="margin:0;">FW: --</div>
+            <div id="updateBadge" class="tag hidden" style="background:var(--success); color:#000; font-weight:bold; cursor:pointer;">
+              Update Available!
+            </div>
+            
           </div>
         </div>
 
@@ -461,6 +510,8 @@ auth.onAuthStateChanged(user => {
             };
 
             initApp();
+            initEmergencyStop();
+            
           }
         });
       } else {
@@ -591,47 +642,67 @@ function initDoseScheduleUI(){
 }
 
 function initApp() {
-      initDoseScheduleUI();
-      // dosing plan pills
-      db.ref(`devices/${activeDeviceId}/dosingPlan`).on('value', s => {
-        const plan = s.val() || {};
-        const cont = document.getElementById('dosingContainer');
-        cont.innerHTML = '';
-        Object.keys(plan).forEach(k => {
-          cont.innerHTML += `<div class="tag"><div class="tag-dot"></div><span style="text-transform:capitalize">${k}</span>: ${plan[k]} ml/day</div>`;
-        });
-      });
+  initDoseScheduleUI();
+  
+  // 1. Dosing Plan Pills
+  db.ref(`devices/${activeDeviceId}/dosingPlan`).on('value', s => {
+    const plan = s.val() || {};
+    const cont = document.getElementById('dosingContainer');
+    cont.innerHTML = '';
+    Object.keys(plan).forEach(k => {
+      cont.innerHTML += `<div class="tag"><div class="tag-dot"></div><span style="text-transform:capitalize">${k}</span>: ${plan[k]} ml/day</div>`;
+    });
+  });
 
-      // live status pills
-      db.ref(`devices/${activeDeviceId}/state`).on('value', (s) => {
-  const st = s.val() || {};
-  const online =
-    st.online === true ||
-    st.online === "true" ||
-    st.online === 1 ||
-    st.online === "1";
+// 2. Device State (Online/Offline/FW Version)
+  const stateRef = db.ref(`devices/${activeDeviceId}/state`);
+  const latestFwRef = db.ref(`settings/latestFirmware`);
 
-  const pill = document.getElementById("liveStatusPill");
-  if (pill) {
-    pill.innerHTML = online
-      ? '<div class="tag-dot" style="background:#4ade80; box-shadow:0 0 10px rgba(74,222,128,.7);"></div>Online'
-      : '<div class="tag-dot" style="background:#f97373; box-shadow:0 0 10px rgba(249,115,115,.7);"></div>Offline';
+  stateRef.on('value', (snapshot) => {
+    const state = snapshot.val() || {};
+    const online = state.online === true || state.online === "true" || state.online === 1;
+    const currentVersion = state.fwVersion || "--";
+
+    // UI Updates
+    const pill = document.getElementById("liveStatusPill");
+    if (pill) {
+      pill.innerHTML = online
+        ? '<div class="tag-dot" style="background:#4ade80; box-shadow:0 0 10px rgba(74,222,128,.7);"></div>Online'
+        : '<div class="tag-dot" style="background:#f97373; box-shadow:0 0 10px rgba(249,115,115,.7);"></div>Offline';
+    }
+    const fwPill = document.getElementById("firmwareInfo");
+    if (fwPill) fwPill.innerText = "FW: " + currentVersion;
+    
+    // Check for update whenever state changes
+    checkUpdate(currentVersion);
+  });
+
+  function checkUpdate(current) {
+    latestFwRef.once('value', (snap) => {
+      const latest = snap.val();
+      const badge = document.getElementById('updateBadge');
+      if (!badge || !latest || current === "--") return;
+
+      if (String(current) !== String(latest)) {
+        badge.classList.remove('hidden');
+        badge.innerText = `Update Available: v${latest}`;
+      } else {
+        badge.classList.add('hidden');
+      }
+    });
   }
 
-  const fw = document.getElementById("firmwareInfo");
-  if (fw) fw.innerText = "FW: " + (st.fwVersion || "--");
-});
+  // 3. Historical Test Logs & Chart
+  db.ref(`devices/${activeDeviceId}/tests`).on('value', s => {
+    const data = s.val() || {};
+    const sorted = Object.values(data).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    updateParamsChart(sorted);
+    updateTestTable(sorted);
+  });
 
-      // tests -> chart/table
-      db.ref(`devices/${activeDeviceId}/tests`).on('value', s => {
-        const data = s.val() || {};
-        const sorted = Object.values(data).sort((a,b) => (a.timestamp||0) - (b.timestamp||0));
-        updateParamsChart(sorted);
-        updateTestTable(sorted);
-      });
-
-      setupCalibrationUI();
-    }
+  // 4. Initialize Calibration Cards
+  setupCalibrationUI();
+}
 
     // ---- OTA trigger ----
     document.getElementById('otaUploadBtn').onclick = function() {
@@ -706,6 +777,46 @@ function initApp() {
   });
 }
 
+function initEmergencyStop() {
+  const eStopBtn = document.getElementById('eStopBtn');
+  const killRef = db.ref(`devices/${activeDeviceId}/settings/killSwitch`);
+
+  // 1. Listen for changes (Updates the button state if you flip it on another device)
+  killRef.on('value', (snapshot) => {
+    const isStopped = snapshot.val() === true;
+    
+    if (isStopped) {
+      eStopBtn.innerText = "⚠️ SYSTEM STOPPED (Reset)";
+      eStopBtn.classList.add('active');
+      eStopBtn.style.background = "linear-gradient(135deg, #4ade80, #166534)"; // Green to indicate "Click to clear"
+    } else {
+      eStopBtn.innerText = "🛑 EMERGENCY STOP";
+      eStopBtn.classList.remove('active');
+      eStopBtn.style.background = "linear-gradient(135deg, #f97373, #b91c1c)";
+    }
+  });
+
+  // 2. Toggle the value on click
+  eStopBtn.onclick = async () => {
+    const currentState = eStopBtn.classList.contains('active'); // active means currently stopped
+    const newState = !currentState;
+    
+    const confirmMsg = newState 
+      ? "KILL ALL PUMPS? This will stop all dosing immediately." 
+      : "Re-enable dosing pumps?";
+
+    if (confirm(confirmMsg)) {
+      try {
+        await killRef.set(newState);
+        console.log("KillSwitch set to:", newState);
+      } catch (err) {
+        alert("Failed to update KillSwitch: " + err.message);
+      }
+    }
+  };
+}
+
+
     function updateTestTable(tests) {
       const body = document.getElementById('logBody');
       body.innerHTML = '';
@@ -718,18 +829,56 @@ function initApp() {
     }
 
     // ---- TEST ENTRY ----
-    document.getElementById('testForm').onsubmit = (e) => {
-      e.preventDefault();
-      db.ref(`devices/${activeDeviceId}/tests`).push({
-        alk: parseFloat(document.getElementById('alk').value),
-        ca: parseFloat(document.getElementById('ca').value),
-        mg: parseFloat(document.getElementById('mg').value),
-        ph: parseFloat(document.getElementById('ph').value),
-        timestamp: Date.now()
-      });
-      alert("Results synced with Reef AI.");
-    };
+document.getElementById('testForm').onsubmit = async (e) => {
+  e.preventDefault();
+  
+  // 1. Check if Emergency Stop is ON
+  const killSnap = await db.ref(`devices/${activeDeviceId}/settings/killSwitch`).once('value');
+  if (killSnap.val() === true) {
+    alert("🛑 CANNOT SYNC: Emergency Stop is active. Reset it first.");
+    return;
+  }
 
+  const alk = parseFloat(document.getElementById('alk').value);
+  const tankSize = parseFloat(document.getElementById('tankSizeInput').value) || 300;
+
+  // 2. Example Alk Calculation (Target 8.5 dKH)
+  // Logic: (Target - Current) * Gallons * (Factor for your specific chemical)
+  const targetAlk = 8.5;
+  const diff = targetAlk - alk;
+  
+  let suggestedDose = 0;
+  if (diff > 0) {
+    // Standard rule of thumb for many 2-parts: ~3.7ml per gallon to raise 1 dKH
+    suggestedDose = diff * tankSize * 3.7; 
+  }
+
+  // 3. Safety Cap: Max 0.5 dKH increase per 24 hours
+  const maxSafeDose = 0.5 * tankSize * 3.7;
+  if (suggestedDose > maxSafeDose) {
+    console.warn("Dose capped for safety");
+    suggestedDose = maxSafeDose;
+  }
+
+  // 4. Push results to History and Update the Dosing Plan
+  try {
+    await db.ref(`devices/${activeDeviceId}/tests`).push({
+      alk,
+      ca: parseFloat(document.getElementById('ca').value),
+      mg: parseFloat(document.getElementById('mg').value),
+      ph: parseFloat(document.getElementById('ph').value),
+      timestamp: Date.now()
+    });
+
+    await db.ref(`devices/${activeDeviceId}/dosingPlan`).update({
+      alk: suggestedDose.toFixed(1)
+    });
+
+    alert(`Synced! New Alk Plan: ${suggestedDose.toFixed(1)}ml total.`);
+  } catch (err) {
+    alert("Sync failed: " + err.message);
+  }
+};
     // ---- CALIBRATION ----
     function setupCalibrationUI() {
       const names = ["Kalkwasser (P1)", "All-For-Reef (P2)", "Magnesium (P3)", "Auxiliary (P4)"];
@@ -820,7 +969,8 @@ function initApp() {
       calStatusUnsub = () => ref.off('value', handler);
     }
 
-    document.getElementById('openCalibrationBtn').onclick = () => {
+    const _openCalibrationBtn = document.getElementById('openCalibrationBtn');
+    if (_openCalibrationBtn) _openCalibrationBtn.onclick = () => {
       document.getElementById('calibrationOverlay').classList.remove('hidden');
       attachCalibrationStatusListener();
     };
@@ -904,6 +1054,53 @@ function initApp() {
       });
     }
 
+async function checkForUpdates(currentFw) {
+  const badge = document.getElementById('updateBadge');
+  try {
+    // Fetches the version file from your Firebase Hosting
+    const response = await fetch(`/devices/${activeDeviceId}/firmware.json`);
+    const latest = await response.json();
+
+    // Compare version strings
+    if (latest.version !== currentFw) {
+      badge.innerHTML = `
+        <div style="display:flex; flex-direction:column; align-items:flex-start; gap:2px;">
+          <span>Update to v${latest.version} Available!</span>
+          <span style="font-size:0.65rem; opacity:0.8;">Build: ${latest.build}</span>
+        </div>
+      `;
+      badge.classList.remove('hidden');
+      
+      badge.onclick = () => {
+        const msg = `New Version: ${latest.version}\nNotes: ${latest.notes}\n\nProceed with OTA flash?`;
+        if(confirm(msg)) {
+          triggerOTA(latest.url);
+        }
+      };
+    } else {
+      badge.classList.add('hidden');
+    }
+  } catch (e) {
+    console.warn("Firmware manifest check failed:", e);
+  }
+}
+
+// Helper to handle the actual OTA database write
+function triggerOTA(url) {
+    const status = document.getElementById('otaStatus');
+    status.innerText = "Triggering OTA...";
+    
+    db.ref(`devices/${activeDeviceId}/otaRequest`).set({
+        fileName: "firmware.bin",
+        url: url,
+        requestedAt: firebase.database.ServerValue.TIMESTAMP
+    }).then(() => {
+        status.innerText = "OTA Request Sent. ESP32 is updating...";
+    }).catch(err => {
+        status.innerText = "Error: " + err.message;
+    });
+}
+
     function attachDoseRunsListener() {
       if (!activeDeviceId) return;
 
@@ -932,7 +1129,8 @@ function initApp() {
       attachDoseRunsListener(); // quick refresh
     }
 
-    document.getElementById("openDoseGraphBtn").onclick = () => {
+    const _openDoseGraphBtn = document.getElementById("openDoseGraphBtn");
+    if (_openDoseGraphBtn) _openDoseGraphBtn.onclick = () => {
       document.getElementById("doseGraphOverlay").classList.remove("hidden");
       attachDoseRunsListener();
     };

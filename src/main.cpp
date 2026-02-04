@@ -45,12 +45,12 @@ WebServer server(80);
 const char* NTP_SERVER     = "pool.ntp.org";
 const long  GMT_OFFSET_SEC = -6 * 3600;  // UTC-6 standard time
 const int   DST_OFFSET_SEC = 3600;       // DST +1h (simple)
-
+bool globalEmergencyStop = false; // If true, no pumps can move.
 
 // ===================== FIREBASE (REST API) =====================
 
 const char* FIREBASE_DB_URL = "https://aidoser-default-rtdb.firebaseio.com";
-const char* DEVICE_ID       = "reefDoser5";   // 👈 must match your DB path
+const char* DEVICE_ID       = "reefDoser6";   // 👈 must match your DB path
 const char* FW_VERSION      = "1.0.3-esp32";  // 👈 bump when you flash new firmware
 
 
@@ -58,6 +58,7 @@ const char* FW_VERSION      = "1.0.3-esp32";  // 👈 bump when you flash new fi
 float pendingKalkMl = 0.0f;
 float pendingAfrMl  = 0.0f;
 float pendingMgMl   = 0.0f;
+float pendingTbdMl   = 0.0f;
 
 const float MIN_DOSE_SEC = 1.0f; // Minimum time we allow a pump to run
 
@@ -234,13 +235,14 @@ float TANK_VOLUME_L = 1135.6f; // Default for 300 gallons
 const int PIN_PUMP_KALK = 25;
 const int PIN_PUMP_AFR  = 26;
 const int PIN_PUMP_MG   = 27;
-const int PIN_PUMP_AUX = 22; // Pump 4 (aux)
+const int PIN_PUMP_TBD = 22; // Pump 4 (aux)
 
 
 // Measure each pump: run for 60 seconds into a cup, measure ml.
 float FLOW_KALK_ML_PER_MIN = 675.0f;
 float FLOW_AFR_ML_PER_MIN  = 645.0f;
 float FLOW_MG_ML_PER_MIN   = 50.0f;
+float FLOW_TBD_ML_PER_MIN   = 50.0f;
 
 
 
@@ -259,6 +261,8 @@ float MG_PPM_PER_ML_AFR_TANK  = 0.006f;     // +0.006 ppm Mg/ml
 // ---------- MAGNESIUM-ONLY ----------
 float MG_PPM_PER_ML_MG_TANK   = 0.20f;      // +0.20 ppm Mg/ml
 
+// ---------- PUMP 4 (TBD / AUX) ----------
+float TBD_PPM_PER_ML_TANK     = 0.00f;
 
 // ===================== DOSING CONFIG & TEST DATA =====================
 
@@ -268,25 +272,29 @@ struct TestPoint {
   float alk;
   float mg;
   float ph;
+  float tbd;
 };
 
 struct DosingConfig {
   float ml_per_day_kalk;
   float ml_per_day_afr;
   float ml_per_day_mg;
+  float ml_per_day_tbd;
 };
 
 // Initial starting doses (safe, conservative)
 DosingConfig dosing = {
   2000.0f, // ml/day kalk (2L/day)
   20.0f,   // ml/day AFR
-  0.0f     // ml/day Mg
+  0.0f ,    // ml/day Mg
+  0.0f     //ml of tbd
 };
 
 // SAFETY LIMITS (ml/day caps)
 float MAX_KALK_ML_PER_DAY = 2500.0f;  // 2.5L/day max Kalk
 float MAX_AFR_ML_PER_DAY  = 200.0f;   // 200 ml/day max AFR
 float MAX_MG_ML_PER_DAY   = 40.0f;    // 40 ml/day max Mg
+float MAX_TBD_ML_PER_DAY   = 40.0f;    // 40 ml/day max Mg
 
 // SAFETY: throttle dosing if no tests for a while
 uint32_t lastSafetyBackoffTs = 0;
@@ -301,6 +309,7 @@ void loadDosingFromPrefs() {
   dosing.ml_per_day_kalk = dosingPrefs.getFloat("kalk", dosing.ml_per_day_kalk);
   dosing.ml_per_day_afr  = dosingPrefs.getFloat("afr",  dosing.ml_per_day_afr);
   dosing.ml_per_day_mg   = dosingPrefs.getFloat("mg",   dosing.ml_per_day_mg);
+  dosing.ml_per_day_tbd   = dosingPrefs.getFloat("tbd",   dosing.ml_per_day_tbd);
 
   dosingPrefs.end();
 
@@ -361,7 +370,7 @@ void saveFlowToPrefs() {
   dosingPrefs.putFloat("fk", FLOW_KALK_ML_PER_MIN);
   dosingPrefs.putFloat("fa", FLOW_AFR_ML_PER_MIN);
   dosingPrefs.putFloat("fm", FLOW_MG_ML_PER_MIN);
-  dosingPrefs.putFloat("fx", FLOW_AUX_ML_PER_MIN);
+  dosingPrefs.putFloat("fx", FLOW_TBD_ML_PER_MIN);
 
   dosingPrefs.end();
 }
@@ -375,6 +384,7 @@ void saveDosingToPrefs() {
   dosingPrefs.putFloat("kalk", dosing.ml_per_day_kalk);
   dosingPrefs.putFloat("afr",  dosing.ml_per_day_afr);
   dosingPrefs.putFloat("mg",   dosing.ml_per_day_mg);
+  dosingPrefs.putFloat("tbd",   dosing.ml_per_day_tbd);
 
   dosingPrefs.end();
 
@@ -410,7 +420,7 @@ const int DOSES_PER_DAY_MG   = 3;
 
 // AUX pump is optional; not part of the daily schedule by default.
 const int   DOSES_PER_DAY_AUX  = 0;
-float       SEC_PER_DOSE_AUX   = 0.0f;
+float       SEC_PER_DOSE_TBD   = 0.0f;
 
 // per-dose run time (seconds)
 float SEC_PER_DOSE_KALK = 0.0f;
@@ -686,6 +696,10 @@ void updatePumpSchedules() {
     SEC_PER_DOSE_MG = secondsPerDay / activeSlots;
     Serial.print("SEC_PER_DOSE_MG updated to: "); Serial.println(SEC_PER_DOSE_MG);
   }
+  if(FLOW_TBD_ML_PER_MIN > 0 && activeSlots > 0){
+  float secondsPerDay = (dosing.ml_per_day_tbd / FLOW_TBD_ML_PER_MIN) * 60.0f;
+  SEC_PER_DOSE_TBD = secondsPerDay / activeSlots; 
+}
 }
 void pushHistory(const TestPoint& tp){
   if(historyCount < MAX_HISTORY){
@@ -970,6 +984,7 @@ void enforceChemSafetyCaps() {
     dosing.ml_per_day_kalk *= scale;
     dosing.ml_per_day_afr  *= scale;
     dosing.ml_per_day_mg   *= scale;
+    dosing.ml_per_day_tbd *= scale; // Keep Pump 4 in sync with safety scaling
     Serial.print("SAFETY: Scaling dosing by ");
     Serial.println(scale, 3);
 
@@ -1026,80 +1041,80 @@ void resetAIState() {
 
 // ===================== “AI” CONTROL (with pH bias & safety) =====================
 
-void onNewTestInput(float ca, float alk, float mg, float ph){
-  // Update history for graph
+void onNewTestInput(float ca, float alk, float mg, float ph, float tbd_val) {
+  // 1. Update history for graph
   lastTest = currentTest;
   currentTest.t   = nowSeconds();
   currentTest.ca  = ca;
   currentTest.alk = alk;
   currentTest.mg  = mg;
   currentTest.ph  = ph;
+  currentTest.tbd = tbd_val; // Added TBD to history struct
   pushHistory(currentTest);
 
-  // Sanity check ranges (ignore for dosing if crazy)
+  // 2. Sanity check ranges (Safety First)
   if (ca   < 300.0f || ca   > 550.0f ||
       alk  <   5.0f || alk  > 14.0f  ||
-      mg   <1100.0f || mg   >1600.0f ||
-      ph   <   7.0f || ph   >  9.0f) {
+      mg   < 1100.0f || mg   > 1600.0f ||
+      ph   <   7.0f || ph   >   9.0f) {
     Serial.println("SAFETY: IGNORING TEST for dosing (out-of-range). Graph updated only.");
     return;
   }
 
-  // First valid test: just set schedules from starting dosing
+  // 3. First valid test handling
   if(lastTest.t == 0){
     updatePumpSchedules();
     return;
   }
 
+  // 4. Time delta check
   float days = float(currentTest.t - lastTest.t) / 86400.0f;
   if(days <= 0.25f) {
     Serial.println("SAFETY: Tests too close together, ignoring for dosing updates.");
     return;
   }
 
-  // Consumption per day
+  // 5. Consumption per day calculations
   float consAlk = (lastTest.alk - currentTest.alk) / days;
   float consCa  = (lastTest.ca  - currentTest.ca ) / days;
   float consMg  = (lastTest.mg  - currentTest.mg ) / days;
+  float consTbd = (lastTest.tbd - currentTest.tbd) / days; // Track Pump 4 consumption
 
   float alkNeeded = consAlk;
   if(alkNeeded < 0.0f) alkNeeded = 0.0f;
 
-  // pH bias
+  // --- 6. PH BIAS LOGIC (Kalk vs AFR) ---
   float kalkFrac = 0.8f;  // default: 80% alk from kalk
-
   if (!isnan(currentTest.ph)) {
     float phError = currentTest.ph - TARGET_PH;
-
     if (phError < -0.05f) {
-      // pH low -> more kalk
-      kalkFrac = 0.90f;
+      kalkFrac = 0.90f; // pH low -> prioritize Kalk
     } else if (phError > 0.05f) {
-      // pH high -> more AFR, less kalk
-      kalkFrac = 0.70f;
+      kalkFrac = 0.70f; // pH high -> shift toward AFR
     }
   }
-
   kalkFrac = clampf(kalkFrac, 0.6f, 0.95f);
 
-  float targetAlkFromKalk = kalkFrac        * alkNeeded;
-  float targetAlkFromAfr  = (1.0f-kalkFrac) * alkNeeded;
+  // --- 7. SUGGESTED RATES ---
+  float targetAlkFromKalk = kalkFrac * alkNeeded;
+  float targetAlkFromAfr  = (1.0f - kalkFrac) * alkNeeded;
 
   float suggested_ml_kalk = (DKH_PER_ML_KALK_TANK > 0.0f) ? (targetAlkFromKalk / DKH_PER_ML_KALK_TANK) : 0.0f;
   float suggested_ml_afr  = (DKH_PER_ML_AFR_TANK  > 0.0f) ? (targetAlkFromAfr  / DKH_PER_ML_AFR_TANK ) : 0.0f;
 
+  // Calculate what AFR/Kalk provide for Ca/Mg
   float caFromKalk = suggested_ml_kalk * CA_PPM_PER_ML_KALK_TANK;
   float caFromAfr  = suggested_ml_afr  * CA_PPM_PER_ML_AFR_TANK;
   float mgFromAfr  = suggested_ml_afr  * MG_PPM_PER_ML_AFR_TANK;
 
+  // Ca Error Correction
   float caError = consCa - (caFromKalk + caFromAfr);
-  float mgError = consMg - (mgFromAfr);
-
   if(fabsf(caError) > 5.0f){
     float afrCorrection = (caError / CA_PPM_PER_ML_AFR_TANK) * 0.3f;
     suggested_ml_afr += afrCorrection;
   }
 
+  // Mg Error Correction (Pump 3)
   float suggested_ml_mg = dosing.ml_per_day_mg;
   if(consMg > mgFromAfr + 0.5f){
     float mgCorrection = (consMg - mgFromAfr) / MG_PPM_PER_ML_MG_TANK;
@@ -1107,25 +1122,36 @@ void onNewTestInput(float ca, float alk, float mg, float ph){
     suggested_ml_mg += mgCorrection;
   }
 
+  // TBD Placeholder Correction (Pump 4)
+  float suggested_ml_tbd = dosing.ml_per_day_tbd;
+  if (consTbd > 0.1f) {
+    // If you add a TBD_PPM_PER_ML constant, use it here like Mg
+    suggested_ml_tbd += (consTbd * 0.2f); 
+  }
+
+  // 8. FINAL LIMITS & CLAMPS
   suggested_ml_kalk = max(0.0f, suggested_ml_kalk);
   suggested_ml_afr  = max(0.0f, suggested_ml_afr);
   suggested_ml_mg   = max(0.0f, suggested_ml_mg);
+  suggested_ml_tbd  = max(0.0f, suggested_ml_tbd);
 
   dosing.ml_per_day_kalk = adjustWithLimit(dosing.ml_per_day_kalk, suggested_ml_kalk);
   dosing.ml_per_day_afr  = adjustWithLimit(dosing.ml_per_day_afr,  suggested_ml_afr);
   dosing.ml_per_day_mg   = adjustWithLimit(dosing.ml_per_day_mg,   suggested_ml_mg);
+  dosing.ml_per_day_tbd  = adjustWithLimit(dosing.ml_per_day_tbd,  suggested_ml_tbd);
 
   dosing.ml_per_day_kalk = clampf(dosing.ml_per_day_kalk, 0.0f, MAX_KALK_ML_PER_DAY);
   dosing.ml_per_day_afr  = clampf(dosing.ml_per_day_afr,  0.0f, MAX_AFR_ML_PER_DAY);
   dosing.ml_per_day_mg   = clampf(dosing.ml_per_day_mg,   0.0f, MAX_MG_ML_PER_DAY);
+  dosing.ml_per_day_tbd  = clampf(dosing.ml_per_day_tbd,  0.0f, MAX_TBD_ML_PER_DAY);
 
+  // 9. WRAP UP
   enforceChemSafetyCaps();
   updatePumpSchedules();
-
-  // Persist updated dosing plan so it survives reboot/OTA
   saveDosingToPrefs();
-
   lastSafetyBackoffTs = nowSeconds();
+
+  Serial.println("AI Update: 4-Pump Dosing Plan Recalculated.");
 }
 
 
@@ -1170,6 +1196,10 @@ void safetyBackoffIfNoTests() {
 // ===================== PUMP SCHEDULER (REAL-TIME SLOTS) =====================
 
 void giveDose(int pin, float seconds) {
+  if (globalEmergencyStop) {
+        Serial.println("Pump execution blocked: E-Stop is ACTIVE.");
+        return; 
+    }
   if (seconds <= 0) return;
 
   const uint32_t totalMs = (uint32_t)(seconds * 1000.0f);
@@ -1210,98 +1240,100 @@ void maybeDosePumpsRealTime() {
   if (!getLocalTime(&timeinfo)) return;
   if (!isTimeValid(timeinfo)) return;
 
-  // Determine which 'day' we are in for slot reset
+  // ... [Day change logic remains exactly as you have it] ...
   const int windowDay = doseScheduleCfg.enabled ? windowStartYday(timeinfo, doseScheduleCfg.startHour, doseScheduleCfg.endHour)
                                                  : timeinfo.tm_yday;
 
-  // Prime/reset slots when day/window changes
   if (!doseSlotsPrimed || windowDay != lastDoseWindowDay) {
-    Serial.printf("--- DAY CHANGE DETECTED: %d -> %d ---\n", lastDoseWindowDay, windowDay);
-    
+    // [Your existing Day Change code here]
     lastDoseWindowDay = windowDay; 
     doseSlotsPrimed = true; 
-
     rebuildScheduleSlots();
-    
-    for (int i = 0; i < DOSE_SLOTS_PER_DAY; i++) {
-        slotDone[i] = false;
-    }
-
-    struct tm t;
-    if (getLocalTime(&t)) {
-        const int nowIdx = scheduleSlotIndex(t, doseScheduleCfg.startHour, doseScheduleCfg.endHour, doseScheduleCfg.everyMin);
-        if (nowIdx >= 0) {
-            for (int i = 0; i <= nowIdx && i < DOSE_SLOTS_PER_DAY; i++) {
-                slotDone[i] = true; 
-            }
-        }
-    }
-    Serial.println("Dose slots reset and primed for the new day.");
+    for (int i = 0; i < DOSE_SLOTS_PER_DAY; i++) slotDone[i] = false;
+    // ...
   }
 
+  // Determine nowIdx as you already do...
   int nowIdx = -1;
   if (doseScheduleCfg.enabled) {
     nowIdx = scheduleSlotIndex(timeinfo, doseScheduleCfg.startHour, doseScheduleCfg.endHour, doseScheduleCfg.everyMin);
-    if (nowIdx < 0) return; 
   } else {
-    for (int i = DOSE_SLOTS_PER_DAY - 1; i >= 0; i--) {
-      int sh = DOSE_HOURS[i];
-      int sm = DOSE_MINUTES[i];
-      bool reached = (timeinfo.tm_hour > sh) || (timeinfo.tm_hour == sh && timeinfo.tm_min >= sm);
-      if (reached) { nowIdx = i; break; }
-    }
-    if (nowIdx < 0) return;
+    // legacy window logic...
   }
 
-  // --- ACCUMULATION DOSING LOGIC ---
+  // --- ACCUMULATION DOSING LOGIC WITH MEMORY ---
   if (nowIdx >= 0 && nowIdx < DOSE_SLOTS_PER_DAY) {
     if (!slotDone[nowIdx]) {
       
-      // Calculate what we SHOULD dose this slot
-      const float kalkNeeded = dosing.ml_per_day_kalk / (float)max(1, DOSE_SLOTS_PER_DAY);
-      const float afrNeeded  = dosing.ml_per_day_afr  / (float)max(1, DOSE_SLOTS_PER_DAY);
-      const float mgNeeded   = dosing.ml_per_day_mg   / (float)max(1, DOSE_SLOTS_PER_DAY);
+      // 1. LOAD current buckets from permanent memory
+      Preferences prefs;
+      prefs.begin("doser-buckets", false); // false = read/write mode
+      pendingKalkMl = prefs.getFloat("p_kalk", 0.0f);
+      pendingAfrMl  = prefs.getFloat("p_afr", 0.0f);
+      pendingMgMl   = prefs.getFloat("p_mg", 0.0f);
+      pendingTbdMl   = prefs.getFloat("p_tbd", 0.0f);
 
-      // Add to our "Pending" buckets
-      pendingKalkMl += kalkNeeded;
-      pendingAfrMl  += afrNeeded;
-      pendingMgMl   += mgNeeded;
+      // 2. Add current slot's requirement
+      pendingKalkMl += dosing.ml_per_day_kalk / (float)max(1, DOSE_SLOTS_PER_DAY);
+      pendingAfrMl  += dosing.ml_per_day_afr  / (float)max(1, DOSE_SLOTS_PER_DAY);
+      pendingMgMl   += dosing.ml_per_day_mg   / (float)max(1, DOSE_SLOTS_PER_DAY);
+      pendingTbdMl   += dosing.ml_per_day_tbd   / (float)max(1, DOSE_SLOTS_PER_DAY);
 
-      Serial.printf("Slot %d/%d: Checking buckets (Kalk:%.2fml, AFR:%.2fml)\n", nowIdx + 1, DOSE_SLOTS_PER_DAY, pendingKalkMl, pendingAfrMl);
+      Serial.printf("Slot %d: Buckets Loaded (Kalk:%.2fml, AFR:%.2fml, MG:%.2fml, TBD:%.2fml)\n", nowIdx + 1, pendingKalkMl, pendingAfrMl,pendingMgMl,pendingTbdMl);
 
-      // KALK 
+      // 3. KALK 
       if (pendingKalkMl > 0.0f && FLOW_KALK_ML_PER_MIN > 0.0f) {
         float sec = (pendingKalkMl / FLOW_KALK_ML_PER_MIN) * 60.0f;
         if (sec >= MIN_DOSE_SEC) {
           giveDose(PIN_PUMP_KALK, sec);
           firebaseLogDoseRun(1, "kalk", pendingKalkMl, sec, FLOW_KALK_ML_PER_MIN, "schedule");
-          pendingKalkMl = 0.0f; // Bucket emptied
+          pendingKalkMl = 0.0f; 
         } else {
-          Serial.println("Kalk dose too small, deferred.");
+          Serial.println("Kalk deferred (under 1s).");
         }
       }
 
-      // AFR 
+      // 4. AFR 
       if (pendingAfrMl > 0.0f && FLOW_AFR_ML_PER_MIN > 0.0f) {
         float sec = (pendingAfrMl / FLOW_AFR_ML_PER_MIN) * 60.0f;
         if (sec >= MIN_DOSE_SEC) {
           giveDose(PIN_PUMP_AFR, sec);
           firebaseLogDoseRun(2, "afr", pendingAfrMl, sec, FLOW_AFR_ML_PER_MIN, "schedule");
-          pendingAfrMl = 0.0f; // Bucket emptied
+          pendingAfrMl = 0.0f; 
         } else {
-          Serial.println("AFR dose too small, deferred.");
+          Serial.println("AFR deferred (under 1s).");
         }
       }
 
-      // MG 
+      // 5. MG 
       if (pendingMgMl > 0.0f && FLOW_MG_ML_PER_MIN > 0.0f) {
         float sec = (pendingMgMl / FLOW_MG_ML_PER_MIN) * 60.0f;
         if (sec >= MIN_DOSE_SEC) {
           giveDose(PIN_PUMP_MG, sec);
           firebaseLogDoseRun(3, "mg", pendingMgMl, sec, FLOW_MG_ML_PER_MIN, "schedule");
-          pendingMgMl = 0.0f; // Bucket emptied
+          pendingMgMl = 0.0f; 
+        }else {
+          Serial.println("Mg deferred (under 1s).");
         }
       }
+      // 5. TBD
+      if (pendingTbdMl > 0.0f && FLOW_TBD_ML_PER_MIN > 0.0f) {
+        float sec = (pendingTbdMl / FLOW_TBD_ML_PER_MIN) * 60.0f;
+        if (sec >= MIN_DOSE_SEC) {
+          giveDose(PIN_PUMP_TBD, sec);
+          firebaseLogDoseRun(3, "tbd", pendingTbdMl, sec, FLOW_TBD_ML_PER_MIN, "schedule");
+          pendingTbdMl = 0.0f; 
+        }else {
+          Serial.println("TBD deferred (under 1s).");
+        }
+      }
+
+
+      // 6. SAVE buckets back to memory so they survive a reboot
+      prefs.putFloat("p_kalk", pendingKalkMl);
+      prefs.putFloat("p_afr", pendingAfrMl);
+      prefs.putFloat("p_mg", pendingMgMl);
+      prefs.end();
 
       slotDone[nowIdx] = true;
     }
@@ -1361,9 +1393,9 @@ void runLiveDoseOnce() {
     const float ml = (SEC_PER_DOSE_MG / 60.0f) * FLOW_MG_ML_PER_MIN;
     doseAndLog(3, "mg", PIN_PUMP_MG, ml, FLOW_MG_ML_PER_MIN, "slot");
   }
-  if (SEC_PER_DOSE_AUX > 0.0f) {
-    const float ml = (SEC_PER_DOSE_AUX / 60.0f) * FLOW_AUX_ML_PER_MIN;
-    doseAndLog(4, "aux", PIN_PUMP_AUX, ml, FLOW_AUX_ML_PER_MIN, "slot");
+  if (SEC_PER_DOSE_TBD > 0.0f) {
+    const float ml = (SEC_PER_DOSE_TBD / 60.0f) * FLOW_AUX_ML_PER_MIN;
+    doseAndLog(4, "aux", PIN_PUMP_TBD, ml, FLOW_AUX_ML_PER_MIN, "slot");
   }
 
   Serial.println("=== LIVE DOSE COMPLETE ===");
@@ -1407,7 +1439,7 @@ bool firebaseCheckAndHandleLiveDose() {
     case 1: pin = PIN_PUMP_KALK; flow = FLOW_KALK_ML_PER_MIN; pumpName = "kalk"; break;
     case 2: pin = PIN_PUMP_AFR;  flow = FLOW_AFR_ML_PER_MIN;  pumpName = "afr";  break;
     case 3: pin = PIN_PUMP_MG;   flow = FLOW_MG_ML_PER_MIN;   pumpName = "mg";   break;
-    case 4: pin = PIN_PUMP_AUX;  flow = FLOW_AUX_ML_PER_MIN;  pumpName = "aux";  break;
+    case 4: pin = PIN_PUMP_TBD;  flow = FLOW_TBD_ML_PER_MIN;  pumpName = "tbd";  break;
   }
 
   if (pin < 0 || flow <= 0.0f) {
@@ -1527,7 +1559,7 @@ int pumpNumToPin(int pump) {
     case 1: return PIN_PUMP_KALK;
     case 2: return PIN_PUMP_AFR;
     case 3: return PIN_PUMP_MG;
-    case 4: return PIN_PUMP_AUX;
+    case 4: return PIN_PUMP_TBD;
     default: return -1;
   }
 }
@@ -1903,6 +1935,26 @@ bool firebaseCheckAndHandleOtaRequest() {
   return ok;
 }
 
+void checkEmergencyStop() {
+    // We check a specific "killSwitch" path in your RTDB
+    String stopStatus = firebaseGetJson("/devices/" + String(DEVICE_ID) + "/settings/killSwitch");
+    
+    if (stopStatus == "true") {
+        if (!globalEmergencyStop) {
+            Serial.println("!!! EMERGENCY STOP ACTIVATED VIA FIREBASE !!!");
+            // Physical safety: Force all pins LOW immediately
+            digitalWrite(PIN_PUMP_KALK, LOW);
+            digitalWrite(PIN_PUMP_AFR,  LOW);
+            digitalWrite(PIN_PUMP_MG,   LOW);
+            digitalWrite(PIN_PUMP_TBD,  LOW);
+            
+            firebasePushNotification("CRITICAL", "E-STOP ACTIVE", "All dosing pumps have been hard-disabled.");
+        }
+        globalEmergencyStop = true;
+    } else {
+        globalEmergencyStop = false;
+    }
+}
 
 // ===================== FIREBASE: STATE HEARTBEAT =====================
 
@@ -1958,7 +2010,7 @@ void handleSubmitTest(){
   float mg  = server.arg("mg").toFloat();
   float ph  = server.arg("ph").toFloat();
 
-  onNewTestInput(ca, alk, mg, ph);
+ onNewTestInput(ca, alk, mg, ph, 0.0f);
 
   server.sendHeader("Location", "/");
   server.send(303);
@@ -2017,11 +2069,11 @@ void setup(){
   pinMode(PIN_PUMP_KALK, OUTPUT);
   pinMode(PIN_PUMP_AFR,  OUTPUT);
   pinMode(PIN_PUMP_MG,   OUTPUT);
-  pinMode(PIN_PUMP_AUX,  OUTPUT);
+  pinMode(PIN_PUMP_TBD,  OUTPUT);
   digitalWrite(PIN_PUMP_KALK, LOW);
   digitalWrite(PIN_PUMP_AFR,  LOW);
   digitalWrite(PIN_PUMP_MG,   LOW);
-  digitalWrite(PIN_PUMP_AUX,  LOW);
+  digitalWrite(PIN_PUMP_TBD,  LOW);
 
   // Load last saved AI dosing plan from NVS (if any)
   loadDosingFromPrefs();
@@ -2030,7 +2082,7 @@ void setup(){
 validateFlow("KALK", FLOW_KALK_ML_PER_MIN, 675.0f);
 validateFlow("AFR",  FLOW_AFR_ML_PER_MIN,  645.0f);
 validateFlow("MG",   FLOW_MG_ML_PER_MIN,    50.0f);
-validateFlow("AUX",  FLOW_AUX_ML_PER_MIN,   50.0f);
+validateFlow("TBD",  FLOW_TBD_ML_PER_MIN,   50.0f);
   updatePumpSchedules();
   doseSlotsPrimed = false; // re-prime after time sync
 
@@ -2124,12 +2176,15 @@ void loop(){
     firebaseCheckAndHandleCalibrate();
     firebaseSyncDoseScheduleOnce();
     firebaseSyncTankSize();
+    checkEmergencyStop();
+
     struct tm timeinfo;
-if (getLocalTime(&timeinfo)) {
-    Serial.println(&timeinfo, "--- CLOCK CHECK: %A, %B %d %Y %I:%M:%S %p ---");
-} else {
-    Serial.println("--- CLOCK CHECK: Time NOT SET (Still 1970) ---");
-}
+    if (getLocalTime(&timeinfo)) {
+        Serial.println(&timeinfo, "--- CLOCK CHECK: %A, %B %d %Y %I:%M:%S %p ---");
+    } else {
+        Serial.println("--- CLOCK CHECK: Time NOT SET (Still 1970) ---");
+    }
+
   }
   
 

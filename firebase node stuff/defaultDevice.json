@@ -1,0 +1,35 @@
+{
+  "calibration": {
+    "pumps": {
+      "pump1": { "durationSec": 60, "ml_caught": 100, "ml_per_min": 100, "unit": "ml/min" },
+      "pump2": { "durationSec": 60, "ml_caught": 100, "ml_per_min": 100, "unit": "ml/min" },
+      "pump3": { "durationSec": 60, "ml_caught": 100, "ml_per_min": 100, "unit": "ml/min" },
+      "pump4": { "durationSec": 60, "ml_caught": 100, "ml_per_min": 100, "unit": "ml/min" }
+    },
+    "status": {
+      "flows": { "afr": 625, "aux": 201, "kalk": 650, "mg": 635 }
+    }
+  },
+  "commands": {
+    "calibrate": { "durationSec": 60, "pump": 1, "trigger": false },
+    "liveDose": { "ml": 10, "pump": 1, "trigger": false },
+    "resetAi": false
+  },
+  "dosing": {
+    "ml_per_day_afr": 0,
+    "ml_per_day_kalk": 0,
+    "ml_per_day_mg": 0
+  },
+  "doseScheduleCfg": {
+    "enabled": false,
+    "everyMin": 30,
+    "startHour": 0,
+    "endHour": 23
+  },
+  "state": {
+    "connected": false,
+    "lastUpdate": 0,
+    "pendingAfr": 0,
+    "pendingKalk": 0
+  }
+}
