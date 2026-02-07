@@ -50,7 +50,7 @@ bool globalEmergencyStop = false; // If true, no pumps can move.
 // ===================== FIREBASE (REST API) =====================
 
 const char* FIREBASE_DB_URL = "https://aidoser-default-rtdb.firebaseio.com";
-const char* DEVICE_ID       = "reefDoser6";   // 👈 must match your DB path
+const char* DEVICE_ID       = "reefDoser1";   // 👈 must match your DB path
 const char* FW_VERSION      = "1.0.3-esp32";  // 👈 bump when you flash new firmware
 
 
@@ -334,7 +334,8 @@ void loadFlowFromPrefs() {
   FLOW_KALK_ML_PER_MIN = dosingPrefs.getFloat("fk", FLOW_KALK_ML_PER_MIN);
   FLOW_AFR_ML_PER_MIN  = dosingPrefs.getFloat("fa", FLOW_AFR_ML_PER_MIN);
   FLOW_MG_ML_PER_MIN   = dosingPrefs.getFloat("fm", FLOW_MG_ML_PER_MIN);
-  FLOW_AUX_ML_PER_MIN  = dosingPrefs.getFloat("fx", FLOW_AUX_ML_PER_MIN);
+  FLOW_TBD_ML_PER_MIN  = dosingPrefs.getFloat("fx", FLOW_TBD_ML_PER_MIN);
+  FLOW_AUX_ML_PER_MIN = FLOW_TBD_ML_PER_MIN; // alias for legacy code
 
   dosingPrefs.end();
 
@@ -345,7 +346,7 @@ void loadFlowFromPrefs() {
   Serial.print(" MG=");
   Serial.print(FLOW_MG_ML_PER_MIN);
   Serial.print(" AUX=");
-  Serial.println(FLOW_AUX_ML_PER_MIN);
+  Serial.println(FLOW_TBD_ML_PER_MIN);
 }
 
 
@@ -1195,12 +1196,12 @@ void safetyBackoffIfNoTests() {
 
 // ===================== PUMP SCHEDULER (REAL-TIME SLOTS) =====================
 
-void giveDose(int pin, float seconds) {
+bool giveDose(int pin, float seconds) {
   if (globalEmergencyStop) {
         Serial.println("Pump execution blocked: E-Stop is ACTIVE.");
-        return; 
+        return false;
     }
-  if (seconds <= 0) return;
+  if (seconds <= 0) return false;
 
   const uint32_t totalMs = (uint32_t)(seconds * 1000.0f);
   const uint32_t beatEveryMs = 5000;   // keep RTDB heartbeat fresh while dosing
@@ -1222,14 +1223,16 @@ void giveDose(int pin, float seconds) {
   }
 
   digitalWrite(pin, LOW);
+  return true;
 }
+
 
 
 // Doses a specific amount on a specific pump, then logs it to RTDB.
 void doseAndLog(int pumpIndex, const String& pumpName, int pin, float ml, float flowMlPerMin, const String& source) {
   if (ml <= 0.0f || flowMlPerMin <= 0.0f) return;
   const float durationSec = (ml / flowMlPerMin) * 60.0f;
-  giveDose(pin, durationSec);
+  if (!giveDose(pin, durationSec)) return;
   firebaseLogDoseRun(pumpIndex, pumpName, ml, durationSec, flowMlPerMin, source);
 }
 
@@ -1285,9 +1288,12 @@ void maybeDosePumpsRealTime() {
       if (pendingKalkMl > 0.0f && FLOW_KALK_ML_PER_MIN > 0.0f) {
         float sec = (pendingKalkMl / FLOW_KALK_ML_PER_MIN) * 60.0f;
         if (sec >= MIN_DOSE_SEC) {
-          giveDose(PIN_PUMP_KALK, sec);
+          if (giveDose(PIN_PUMP_KALK, sec)) {
           firebaseLogDoseRun(1, "kalk", pendingKalkMl, sec, FLOW_KALK_ML_PER_MIN, "schedule");
-          pendingKalkMl = 0.0f; 
+          pendingKalkMl = 0.0f;
+        } else {
+          Serial.println("E-Stop active: skipped KALK dosing, kept pending volume.");
+        } 
         } else {
           Serial.println("Kalk deferred (under 1s).");
         }
@@ -1297,9 +1303,12 @@ void maybeDosePumpsRealTime() {
       if (pendingAfrMl > 0.0f && FLOW_AFR_ML_PER_MIN > 0.0f) {
         float sec = (pendingAfrMl / FLOW_AFR_ML_PER_MIN) * 60.0f;
         if (sec >= MIN_DOSE_SEC) {
-          giveDose(PIN_PUMP_AFR, sec);
+          if (giveDose(PIN_PUMP_AFR, sec)) {
           firebaseLogDoseRun(2, "afr", pendingAfrMl, sec, FLOW_AFR_ML_PER_MIN, "schedule");
-          pendingAfrMl = 0.0f; 
+          pendingAfrMl = 0.0f;
+        } else {
+          Serial.println("E-Stop active: skipped AFR dosing, kept pending volume.");
+        } 
         } else {
           Serial.println("AFR deferred (under 1s).");
         }
@@ -1309,9 +1318,12 @@ void maybeDosePumpsRealTime() {
       if (pendingMgMl > 0.0f && FLOW_MG_ML_PER_MIN > 0.0f) {
         float sec = (pendingMgMl / FLOW_MG_ML_PER_MIN) * 60.0f;
         if (sec >= MIN_DOSE_SEC) {
-          giveDose(PIN_PUMP_MG, sec);
+          if (giveDose(PIN_PUMP_MG, sec)) {
           firebaseLogDoseRun(3, "mg", pendingMgMl, sec, FLOW_MG_ML_PER_MIN, "schedule");
-          pendingMgMl = 0.0f; 
+          pendingMgMl = 0.0f;
+        } else {
+          Serial.println("E-Stop active: skipped MG dosing, kept pending volume.");
+        } 
         }else {
           Serial.println("Mg deferred (under 1s).");
         }
@@ -1320,9 +1332,12 @@ void maybeDosePumpsRealTime() {
       if (pendingTbdMl > 0.0f && FLOW_TBD_ML_PER_MIN > 0.0f) {
         float sec = (pendingTbdMl / FLOW_TBD_ML_PER_MIN) * 60.0f;
         if (sec >= MIN_DOSE_SEC) {
-          giveDose(PIN_PUMP_TBD, sec);
-          firebaseLogDoseRun(3, "tbd", pendingTbdMl, sec, FLOW_TBD_ML_PER_MIN, "schedule");
-          pendingTbdMl = 0.0f; 
+          if (giveDose(PIN_PUMP_TBD, sec)) {
+          firebaseLogDoseRun(4, "aux", pendingTbdMl, sec, FLOW_TBD_ML_PER_MIN, "schedule");
+          pendingTbdMl = 0.0f;
+        } else {
+          Serial.println("E-Stop active: skipped AUX dosing, kept pending volume.");
+        } 
         }else {
           Serial.println("TBD deferred (under 1s).");
         }
@@ -1333,6 +1348,7 @@ void maybeDosePumpsRealTime() {
       prefs.putFloat("p_kalk", pendingKalkMl);
       prefs.putFloat("p_afr", pendingAfrMl);
       prefs.putFloat("p_mg", pendingMgMl);
+      prefs.putFloat("p_tbd", pendingTbdMl);
       prefs.end();
 
       slotDone[nowIdx] = true;
@@ -1617,7 +1633,7 @@ bool firebaseCheckAndHandleCalibrate() {
   } else {
     Serial.printf("Calibrate: running pump %d on pin %d for %d sec...\n", pump, pin, durationSec);
     giveDose(pin, (float)durationSec);
-    Serial.println("Calibrate: done.");
+Serial.println("Calibrate: done.");
   }
 
   // Clear trigger and write lastRun
@@ -1689,14 +1705,15 @@ bool firebaseSyncFlowCalibrationOnce() {
   float fk = parsePump(1, FLOW_KALK_ML_PER_MIN);
   float fa = parsePump(2, FLOW_AFR_ML_PER_MIN);
   float fm = parsePump(3, FLOW_MG_ML_PER_MIN);
-  float fx = parsePump(4, FLOW_AUX_ML_PER_MIN);
+  float fx = parsePump(4, FLOW_TBD_ML_PER_MIN);
 
-  bool changed = (fk != FLOW_KALK_ML_PER_MIN) || (fa != FLOW_AFR_ML_PER_MIN) || (fm != FLOW_MG_ML_PER_MIN) || (fx != FLOW_AUX_ML_PER_MIN);
+  bool changed = (fk != FLOW_KALK_ML_PER_MIN) || (fa != FLOW_AFR_ML_PER_MIN) || (fm != FLOW_MG_ML_PER_MIN) || (fx != FLOW_TBD_ML_PER_MIN);
 
   FLOW_KALK_ML_PER_MIN = fk;
   FLOW_AFR_ML_PER_MIN  = fa;
   FLOW_MG_ML_PER_MIN   = fm;
-  FLOW_AUX_ML_PER_MIN  = fx;
+  FLOW_TBD_ML_PER_MIN  = fx;
+  FLOW_AUX_ML_PER_MIN  = fx; // keep in sync (legacy)
 
   if (changed) {
     Serial.print("Flow updated from RTDB: KALK=");
