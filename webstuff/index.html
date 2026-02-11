@@ -68,6 +68,76 @@
     font-weight: 600;
   }
 
+  /* Compact header buttons (mobile-friendly) */
+.btn-compact {
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  border-radius: 999px;
+  line-height: 1;
+}
+
+.header-right {
+  display:flex;
+  gap: 12px;
+  align-items:center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pill-sensor{
+  background: rgba(34, 211, 238, 0.15);
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+
+/* Tighten header spacing on small screens */
+/* REPLACE the existing @media (max-width: 600px) .header-right block with this: */
+@media (max-width: 600px) {
+  header { 
+    flex-direction: column; /* Stack logo/tank size above the buttons */
+    align-items: center; 
+    gap: 15px;
+  }
+
+  .header-right {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;       /* Allow buttons to wrap to a new line */
+    justify-content: center; /* Center them on iPhone */
+    gap: 8px;
+    padding-bottom: 0;
+    overflow-x: visible;   /* Disable the horizontal scroll */
+  }
+
+  .header-right > * { 
+    flex: 0 1 auto;        /* Let buttons size naturally */
+  }
+
+  /* Make buttons slightly larger targets for thumbs */
+  .btn-compact {
+    padding: 10px 14px;
+    font-size: 0.8rem;
+  }
+
+  .pill-sensor { 
+    font-size: 0.75rem; 
+    padding: 5px 10px; 
+  }
+}
+
+  header > div:last-child {
+    gap: 6px;
+  }
+
+  .btn-emergency {
+    padding: 10px 14px;
+    font-size: 0.85rem;
+  }
+}
+
+
 /* Emergency Stop Button Styling */
 .btn-emergency {
   background: linear-gradient(135deg, #f97373, #b91c1c);
@@ -213,6 +283,20 @@
   .plan-grid{grid-template-columns:1fr;}
 }
 
+/* MOBILE: tame the Emergency Stop button */
+@media (max-width: 600px) {
+  .btn-emergency {
+    padding: 8px 12px;
+    font-size: 0.75rem;
+    min-height: auto;
+    box-shadow: 0 0 10px rgba(249,115,115,0.35);
+  }
+
+  .btn-emergency.active {
+    box-shadow: 0 0 10px rgba(74,222,128,0.35);
+  }
+}
+
 </style>
 </head>
 
@@ -240,12 +324,19 @@
       <span style="font-size: 0.8rem; color: var(--accent);">Gallons</span>
     </div>
   </div>
-  <div style="display:flex; gap: 12px; align-items: center;">
-    <button id="openDoseGraphBtn" class="btn-outline-soft">📊 Dosing History</button>
-    <button id="openCalibrationBtn" class="btn-outline-soft">🧪 Calibrate</button>
+  <div class="header-right">
+    <span id="tempPill" class="pill pill-sensor">-- °F</span>
+<span id="phPill" class="pill pill-sensor">pH --</span>
+<span id="sgPill" class="pill pill-sensor">SG --</span>
+<button id="openDoseGraphBtn" class="btn-outline-soft btn-compact">
+  📊 History
+</button>
+<button id="openCalibrationBtn" class="btn-outline-soft btn-compact">
+  🧪 Calibrate
+</button>
 
-    <button id="eStopBtn" class="btn-emergency">🛑 EMERGENCY STOP</button>
-    <button id="logoutBtn" class="btn-outline-soft" style="color:var(--danger);">Logout</button>
+    <button id="eStopBtn" class="btn-emergency btn-compact">🛑 EMERGENCY STOP</button>
+    <button id="logoutBtn" class="btn-outline-soft btn-compact" style="color:var(--danger);">Logout</button>
   </div>
 </header>
       <!-- PARAMETER CHART -->
@@ -643,6 +734,7 @@ function initDoseScheduleUI(){
 
 function initApp() {
   initDoseScheduleUI();
+  subscribeSensors();
   
   // 1. Dosing Plan Pills
   db.ref(`devices/${activeDeviceId}/dosingPlan`).on('value', s => {
@@ -656,12 +748,12 @@ function initApp() {
 
 // 2. Device State (Online/Offline/FW Version)
   const stateRef = db.ref(`devices/${activeDeviceId}/state`);
-  const latestFwRef = db.ref(`settings/latestFirmware`);
-
+  // Firmware update manifest is served from Hosting per-device:
+  // /devices/<deviceId>/firmware.json
   stateRef.on('value', (snapshot) => {
     const state = snapshot.val() || {};
     const online = state.online === true || state.online === "true" || state.online === 1;
-    const currentVersion = state.fwVersion || "--";
+    const currentVersion = state.fwVersion || state.fwVerions || state.fwVersionName || "--";
 
     // UI Updates
     const pill = document.getElementById("liveStatusPill");
@@ -674,23 +766,8 @@ function initApp() {
     if (fwPill) fwPill.innerText = "FW: " + currentVersion;
     
     // Check for update whenever state changes
-    checkUpdate(currentVersion);
+    checkForUpdates(currentVersion);
   });
-
-  function checkUpdate(current) {
-    latestFwRef.once('value', (snap) => {
-      const latest = snap.val();
-      const badge = document.getElementById('updateBadge');
-      if (!badge || !latest || current === "--") return;
-
-      if (String(current) !== String(latest)) {
-        badge.classList.remove('hidden');
-        badge.innerText = `Update Available: v${latest}`;
-      } else {
-        badge.classList.add('hidden');
-      }
-    });
-  }
 
   // 3. Historical Test Logs & Chart
   db.ref(`devices/${activeDeviceId}/tests`).on('value', s => {
@@ -1054,37 +1131,49 @@ document.getElementById('testForm').onsubmit = async (e) => {
       });
     }
 
-async function checkForUpdates(currentFw) {
-  const badge = document.getElementById('updateBadge');
-  try {
-    // Fetches the version file from your Firebase Hosting
-    const response = await fetch(`/devices/${activeDeviceId}/firmware.json`);
-    const latest = await response.json();
-
-    // Compare version strings
-    if (latest.version !== currentFw) {
-      badge.innerHTML = `
-        <div style="display:flex; flex-direction:column; align-items:flex-start; gap:2px;">
-          <span>Update to v${latest.version} Available!</span>
-          <span style="font-size:0.65rem; opacity:0.8;">Build: ${latest.build}</span>
-        </div>
-      `;
-      badge.classList.remove('hidden');
-      
-      badge.onclick = () => {
-        const msg = `New Version: ${latest.version}\nNotes: ${latest.notes}\n\nProceed with OTA flash?`;
-        if(confirm(msg)) {
-          triggerOTA(latest.url);
-        }
-      };
-    } else {
-      badge.classList.add('hidden');
-    }
-  } catch (e) {
-    console.warn("Firmware manifest check failed:", e);
-  }
+function normalizeVersion(v) {
+  return String(v || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^v/, "")      // allow "v1.0.4"
+    .split(/[+\-]/)[0];     // strips "-esp32" or "+build"
 }
+///////////////sensor data//////////////////
+function subscribeSensors() {
+  if (!activeDeviceId) return;
 
+  const tempPill = document.getElementById("tempPill");
+  const phPill   = document.getElementById("phPill");
+  const sgPill   = document.getElementById("sgPill");
+
+  if (tempPill) tempPill.textContent = "… °F";
+  if (phPill)   phPill.textContent   = "pH …";
+  if (sgPill)   sgPill.textContent   = "SG …";
+
+  const tempRef = db.ref(`devices/${activeDeviceId}/sensors/tempF`);
+  const pHRef   = db.ref(`devices/${activeDeviceId}/sensors/pH`);
+  const sgRef   = db.ref(`devices/${activeDeviceId}/sensors/sg`);
+
+  tempRef.off(); pHRef.off(); sgRef.off();
+
+  tempRef.on("value", (snap) => {
+    const n = (typeof snap.val() === "number") ? snap.val() : parseFloat(snap.val());
+    if (tempPill && isFinite(n)) tempPill.textContent = `${n.toFixed(1)} °F`;
+    else if (tempPill) tempPill.textContent = "-- °F";
+  });
+
+  pHRef.on("value", (snap) => {
+    const n = (typeof snap.val() === "number") ? snap.val() : parseFloat(snap.val());
+    if (phPill && isFinite(n)) phPill.textContent = `pH ${n.toFixed(2)}`;
+    else if (phPill) phPill.textContent = "pH --";
+  });
+
+  sgRef.on("value", (snap) => {
+    const n = (typeof snap.val() === "number") ? snap.val() : parseFloat(snap.val());
+    if (sgPill && isFinite(n)) sgPill.textContent = `SG ${n.toFixed(4)}`;
+    else if (sgPill) sgPill.textContent = "SG --";
+  });
+}
 // Helper to handle the actual OTA database write
 function triggerOTA(url) {
     const status = document.getElementById('otaStatus');

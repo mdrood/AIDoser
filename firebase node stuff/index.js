@@ -97,7 +97,7 @@ exports.pushOnDeviceNotification = functions.database
 
 /** ------------------ OFFLINE MONITOR (CLOUD-ONLY) ------------------ **/
 
-// How long until we consider it offline (choose what you want)
+// How long until we consider it offline
 const OFFLINE_MS = 4 * 60 * 1000; // 4 minutes
 
 exports.offlineMonitor = functions.pubsub
@@ -118,30 +118,22 @@ exports.offlineMonitor = functions.pubsub
       const state = dev.state || {};
 
       const lastSeen = Number(state.lastSeen || 0);
-      const online = !!state.online;
-
-      // If we never saw it, skip
-      if (!lastSeen) continue;
+      if (!lastSeen) continue; // never seen it
 
       const stale = (now - lastSeen) > OFFLINE_MS;
 
-      // Only notify ONCE per offline event
+      // Use offlineSince as the latch (NOT state.online)
       const offlineSince = Number(state.offlineSince || 0);
-      const alreadyOffline = !online;
 
-      // Transition online -> offline
-      if (online && stale) {
+      // ---- OFFLINE: first time we detect staleness ----
+      if (stale && !offlineSince) {
         updates[`devices/${deviceId}/state/online`] = false;
         updates[`devices/${deviceId}/state/offlineSince`] = now;
 
-        // Write a notification (your push function will deliver it)
-        const title = `${deviceId} offline`;
-        const body = `No heartbeat since ${new Date(lastSeen).toLocaleString("en-US", { timeZone: "America/Chicago" })}`;
-
         notifWrites.push(
           db.ref(`devices/${deviceId}/notifications`).push({
-            title,
-            body,
+            title: `${deviceId} offline`,
+            body: `No heartbeat since ${new Date(lastSeen).toLocaleString("en-US", { timeZone: "America/Chicago" })}`,
             severity: "critical",
             type: "device_offline",
             ts: now,
@@ -150,17 +142,13 @@ exports.offlineMonitor = functions.pubsub
         );
       }
 
-      // Optional: when it comes back (stale=false) flip online true + notify once
-      // Only do this if you WANT "back online" pushes.
-      const onlineSince = Number(state.onlineSince || 0);
-      const shouldBeOnline = !stale;
-
-      if (alreadyOffline && shouldBeOnline) {
+      // ---- ONLINE AGAIN: staleness cleared and we were previously offline ----
+      if (!stale && offlineSince) {
         updates[`devices/${deviceId}/state/online`] = true;
         updates[`devices/${deviceId}/state/onlineSince`] = now;
-        updates[`devices/${deviceId}/state/offlineSince`] = null;
+        updates[`devices/${deviceId}/state/offlineSince`] = 0; // safer than null (avoids rule issues)
 
-        // Comment this block out if you don't want "back online" pushes
+        // If you DON'T want "back online" pushes, delete this block
         notifWrites.push(
           db.ref(`devices/${deviceId}/notifications`).push({
             title: `${deviceId} online`,
@@ -180,6 +168,212 @@ exports.offlineMonitor = functions.pubsub
     if (notifWrites.length) {
       await Promise.all(notifWrites);
     }
+
+    return null;
+  });
+  // ---- Prune doseRuns older than 365 days ------------------------
+
+const PRUNE_KEEP_DAYS = 365;
+const PRUNE_BATCH_SIZE = 500;
+
+// Runs daily at 03:15am Chicago time (quiet hours)
+exports.pruneDoseRuns = functions.pubsub
+  .schedule("15 3 * * *")
+  .timeZone("America/Chicago")
+  .onRun(async () => {
+    const db = admin.database();
+    const cutoff = Date.now() - PRUNE_KEEP_DAYS * 24 * 60 * 60 * 1000;
+
+    const devicesSnap = await db.ref("devices").once("value");
+    const devices = devicesSnap.val() || {};
+
+    let totalDeleted = 0;
+
+    for (const deviceId of Object.keys(devices)) {
+      // Keep deleting in batches until no more old rows
+      while (true) {
+        const qSnap = await db
+          .ref(`devices/${deviceId}/doseRuns`)
+          .orderByChild("ts")
+          .endAt(cutoff)
+          .limitToFirst(PRUNE_BATCH_SIZE)
+          .once("value");
+
+        const old = qSnap.val();
+        if (!old) break;
+
+        const updates = {};
+        for (const runId of Object.keys(old)) {
+          updates[runId] = null;
+        }
+
+        await db.ref(`devices/${deviceId}/doseRuns`).update(updates);
+
+        const deletedNow = Object.keys(updates).length;
+        totalDeleted += deletedNow;
+
+        // If we deleted fewer than batch size, we're done for this device
+        if (deletedNow < PRUNE_BATCH_SIZE) break;
+      }
+    }
+
+    console.log(`pruneDoseRuns: deleted ${totalDeleted} records older than ${PRUNE_KEEP_DAYS} days`);
+    return null;
+  });
+
+  // ---- Prune notifications older than N days ----------------------
+
+const PRUNE_NOTIF_KEEP_DAYS = 30;      // change to 60/90/365 if you want
+const PRUNE_NOTIF_BATCH_SIZE = 500;
+
+exports.pruneNotifications = functions.pubsub
+  .schedule("25 3 * * *")              // daily 03:25am
+  .timeZone("America/Chicago")
+  .onRun(async () => {
+    const db = admin.database();
+    const cutoff = Date.now() - PRUNE_NOTIF_KEEP_DAYS * 24 * 60 * 60 * 1000;
+
+    const devicesSnap = await db.ref("devices").once("value");
+    const devices = devicesSnap.val() || {};
+
+    let totalDeleted = 0;
+
+    for (const deviceId of Object.keys(devices)) {
+      while (true) {
+        const qSnap = await db
+          .ref(`devices/${deviceId}/notifications`)
+          .orderByChild("ts")
+          .endAt(cutoff)
+          .limitToFirst(PRUNE_NOTIF_BATCH_SIZE)
+          .once("value");
+
+        const old = qSnap.val();
+        if (!old) break;
+
+        const updates = {};
+        for (const notifId of Object.keys(old)) {
+          updates[notifId] = null;
+        }
+
+        await db.ref(`devices/${deviceId}/notifications`).update(updates);
+
+        const deletedNow = Object.keys(updates).length;
+        totalDeleted += deletedNow;
+
+        if (deletedNow < PRUNE_NOTIF_BATCH_SIZE) break;
+      }
+    }
+
+    console.log(`pruneNotifications: deleted ${totalDeleted} notifications older than ${PRUNE_NOTIF_KEEP_DAYS} days`);
+    return null;
+  });
+
+  /** ------------------ SENSOR RANGE ALERTS (RTDB -> notifications) ------------------ **/
+
+
+  /** ------------------ SENSOR RANGE ALERTS (RTDB -> notifications) ------------------ **/
+
+const SENSOR_LIMITS = {
+  pH:    { min: 7.5,   max: 10.5,  label: "pH" },
+  tempF: { min: 75.0,  max: 82.0,  label: "Temp (°F)" },
+  sg:    { min: 1.023, max: 1.027, label: "Salinity (SG)" },
+};
+
+// avoid spam while a value stays bad
+const SENSOR_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
+
+exports.sensorRangeAlerts = functions.database
+  .ref("devices/{deviceId}/sensors/{sensorKey}")
+  .onWrite(async (change, ctx) => {
+    const deviceId = String(ctx.params.deviceId || "");
+    const sensorKey = String(ctx.params.sensorKey || "");
+
+    const limits = SENSOR_LIMITS[sensorKey];
+    if (!limits) return null;
+
+    const now = Date.now();
+
+    // Ignore deletes
+    const raw = change.after.val();
+    if (raw === null || raw === undefined) return null;
+
+    // Support either plain number OR { value: <num>, ts: <ms> }
+    const value = Number(
+      (typeof raw === "object" && raw !== null && raw.value !== undefined) ? raw.value : raw
+    );
+    if (!Number.isFinite(value)) return null;
+
+    const outLow = value < limits.min;
+    const outHigh = value > limits.max;
+    const outOfRange = outLow || outHigh;
+
+    // Latch state: devices/<id>/state/sensorAlerts/<sensorKey>
+    const latchRef = admin.database().ref(`devices/${deviceId}/state/sensorAlerts/${sensorKey}`);
+    const latchSnap = await latchRef.once("value");
+    const latch = latchSnap.val() || {};
+
+    const wasOut = !!latch.outOfRange;
+    const lastSentAt = Number(latch.lastSentAt || 0);
+
+    // -------- BACK TO NORMAL (transition only) --------
+    if (!outOfRange) {
+      // If we were previously out-of-range, send "back to normal" ONCE
+      if (wasOut) {
+        const title = `${deviceId} ${limits.label} normal`;
+        const body = `${limits.label} is back in range at ${value} (expected ${limits.min}–${limits.max}).`;
+
+        await admin.database().ref(`devices/${deviceId}/notifications`).push({
+          title,
+          body,
+          deviceId,
+          severity: "warning", // choose "warning" or "critical" — warning is usually nicer
+          type: `sensor_${sensorKey}_back_normal`,
+          sensorKey,
+          value,
+          min: limits.min,
+          max: limits.max,
+          ts: now
+        });
+
+        await latchRef.set({ outOfRange: false, lastSentAt: now, lastValue: value });
+      } else {
+        await latchRef.update({ lastValue: value });
+      }
+      return null;
+    }
+
+    // -------- OUT OF RANGE --------
+    // Alert on transition OR after cooldown
+    const cooldownPassed = (now - lastSentAt) > SENSOR_COOLDOWN_MS;
+    const shouldAlert = (!wasOut) || cooldownPassed;
+
+    if (!shouldAlert) {
+      await latchRef.update({ outOfRange: true, lastValue: value });
+      return null;
+    }
+
+    const which = outLow ? "LOW" : "HIGH";
+    const title = `${deviceId} ${limits.label} ${which}`;
+    const body = `${limits.label} is ${value}. Expected ${limits.min}–${limits.max}.`;
+
+    await admin.database().ref(`devices/${deviceId}/notifications`).push({
+      title,
+      body,
+      deviceId,
+      severity: "critical",
+      type: `sensor_${sensorKey}_out_of_range`,
+      sensorKey,
+      value,
+      min: limits.min,
+      max: limits.max,
+      ts: now
+    });
+
+    await latchRef.set({
+      outOfRange: true,
+      lastSentAt: now,
+      lastValue: value
+    });
 
     return null;
   });
