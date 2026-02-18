@@ -50,9 +50,9 @@ bool globalEmergencyStop = false; // If true, no pumps can move.
 // ===================== FIREBASE (REST API) =====================
 
 const char* FIREBASE_DB_URL = "https://aidoser-default-rtdb.firebaseio.com";
-const char* DEVICE_ID       = "reefDoser1";   // 👈 must match your DB path
-const char* FW_VERSION      = "1.0.3-esp32";  // 👈 bump when you flash new firmware
-
+const char* DEVICE_ID       = "reefDoser6";   // 👈 must match your DB path
+const char* FW_VERSION      = "1.0.4";  // 👈 bump when you flash new firmware
+ 
 
 // Add these to your global variables at the top
 float pendingKalkMl = 0.0f;
@@ -1858,98 +1858,32 @@ bool performOtaFromUrl(const String& url) {
   return true; // never reached
 }
 
-// Check /devices/{DEVICE_ID}/otaRequest for a URL
-bool firebaseCheckAndHandleOtaRequest() {
-  if (WiFi.status() != WL_CONNECTED) return false;
+// Check /devices/{DEVICE_ID}/commands/otaRequest for an update trigger
+void firebaseCheckAndHandleOtaRequest() {
+  if (WiFi.status() != WL_CONNECTED) return;
 
-  String path = "/devices/" + String(DEVICE_ID) + "/otaRequest";
+  // This ensures we are looking at the "reefDoser6" folder in the database
+  String path = "/devices/" + String(DEVICE_ID) + "/commands/otaRequest";
+  
   String payload = firebaseGetJson(path);
-  if (payload.length() == 0 || payload == "null") {
-    return false;
-  }
+  
+  // If nothing is there, or it's "null", just exit
+  if (payload.length() == 0 || payload == "null") return;
 
-  Serial.print("otaRequest payload: ");
-  Serial.println(payload);
+  Serial.println("OTA Trigger command detected!");
 
-  // --- Require trigger === true ---
-  bool trigger = false;
-  int trigKey = payload.indexOf("\"trigger\"");
-  if (trigKey >= 0) {
-    int colonT = payload.indexOf(':', trigKey);
-    if (colonT >= 0) {
-      String rest = payload.substring(colonT + 1);
-      rest.trim();
-      if (rest.startsWith("true") || rest.startsWith(" true")) {
-        trigger = true;
-      }
-    }
-  }
+  // HARD-FIX: We ignore the URL inside the payload. 
+  // We force it to use reefDoser6 based on the DEVICE_ID at the top of this file.
+  String myCorrectUrl = "https://aidoser.web.app/devices/" + String(DEVICE_ID) + "/firmware.bin";
 
-  if (!trigger) {
-    // We have a URL staged but no trigger: do nothing.
-    return false;
-  }
+  Serial.print("Forcing update from: ");
+  Serial.println(myCorrectUrl);
 
-  // --- Parse URL field ---
-  int urlKey = payload.indexOf("\"url\"");
-  if (urlKey < 0) {
-    firebaseSetOtaStatus("error", "otaRequest missing url");
-    return false;
-  }
+  // 1. CLEANUP: Clear the request in Firebase so it doesn't reboot into an infinite update loop
+  firebasePutJson(path, "null");
 
-  int colon = payload.indexOf(':', urlKey);
-  if (colon < 0) {
-    firebaseSetOtaStatus("error", "otaRequest url parse error");
-    return false;
-  }
-
-  int firstQuote = payload.indexOf('"', colon + 1);
-  if (firstQuote < 0) {
-    firebaseSetOtaStatus("error", "otaRequest url quote error");
-    return false;
-  }
-
-  int secondQuote = payload.indexOf('"', firstQuote + 1);
-  if (secondQuote < 0) {
-    firebaseSetOtaStatus("error", "otaRequest url quote error2");
-    return false;
-  }
-
-  String url = payload.substring(firstQuote + 1, secondQuote);
-  url.trim();
-
-  if (url.length() == 0) {
-    firebaseSetOtaStatus("error", "otaRequest url empty");
-    return false;
-  }
-
-  // Optional: ensure http(s)
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    firebaseSetOtaStatus("error", "otaRequest url must be http(s)");
-
-    // Clear trigger so we don't keep retrying bad URL
-    String clearJson = "{";
-    clearJson += "\"url\":\"" + url + "\",";
-    clearJson += "\"trigger\":false";
-    clearJson += "}";
-    firebasePutJson(path, clearJson);
-
-    return false;
-  }
-
-  Serial.print("Parsed OTA URL: ");
-  Serial.println(url);
-
-  // Clear trigger BEFORE running OTA so it only runs once per click
-  String clearJson = "{";
-  clearJson += "\"url\":\"" + url + "\",";
-  clearJson += "\"trigger\":false";
-  clearJson += "}";
-  firebasePutJson(path, clearJson);
-
-  // Perform OTA (on success, performOtaFromUrl will also set otaRequest to null)
-  bool ok = performOtaFromUrl(url);
-  return ok;
+  // 2. EXECUTE: Use the URL we just built
+  performOtaFromUrl(myCorrectUrl); 
 }
 
 void checkEmergencyStop() {
@@ -1981,16 +1915,57 @@ void firebaseSendStateHeartbeat() {
   time_t nowSec = time(NULL);
   uint64_t tsMs = (nowSec > 0) ? (uint64_t)nowSec * 1000ULL : (uint64_t)millis();
 
+  // Pull pending buckets (so UI can explain catch-up)
+  float pk = 0, pa = 0, pm = 0, pt = 0;
+  {
+    Preferences prefs;
+    if (prefs.begin("doser-buckets", true)) {
+      pk = prefs.getFloat("p_kalk", 0.0f);
+      pa = prefs.getFloat("p_afr",  0.0f);
+      pm = prefs.getFloat("p_mg",   0.0f);
+      pt = prefs.getFloat("p_tbd",  0.0f);
+      prefs.end();
+    }
+  }
+
+  int activeSlots = (doseScheduleCfg.enabled) ? DOSE_SLOTS_PER_DAY : 3;
+  if (activeSlots < 1) activeSlots = 1;
+
   String path = "/devices/" + String(DEVICE_ID) + "/state";
 
   String json = "{";
   json += "\"online\":true,";
   json += "\"fwVersion\":\"" + String(FW_VERSION) + "\",";
-  json += "\"lastSeen\":" + String((unsigned long long)tsMs);
+  json += "\"lastSeen\":" + String((unsigned long long)tsMs) + ",";
+
+  json += "\"dosingMlPerDay\":{";
+  json += "\"kalk\":" + String(dosing.ml_per_day_kalk, 2) + ",";
+  json += "\"afr\":"  + String(dosing.ml_per_day_afr,  2) + ",";
+  json += "\"mg\":"   + String(dosing.ml_per_day_mg,   2) + ",";
+  json += "\"tbd\":"  + String(dosing.ml_per_day_tbd,  2);
+  json += "},";
+
+  json += "\"doseSlotsPerDay\":" + String(activeSlots) + ",";
+
+  json += "\"pendingMl\":{";
+  json += "\"kalk\":" + String(pk, 2) + ",";
+  json += "\"afr\":"  + String(pa, 2) + ",";
+  json += "\"mg\":"   + String(pm, 2) + ",";
+  json += "\"tbd\":"  + String(pt, 2);
+  json += "},";
+
+  json += "\"flowMlPerMin\":{";
+  json += "\"kalk\":" + String(FLOW_KALK_ML_PER_MIN, 2) + ",";
+  json += "\"afr\":"  + String(FLOW_AFR_ML_PER_MIN,  2) + ",";
+  json += "\"mg\":"   + String(FLOW_MG_ML_PER_MIN,   2) + ",";
+  json += "\"tbd\":"  + String(FLOW_TBD_ML_PER_MIN,  2);
+  json += "}";
+
   json += "}";
 
   firebasePutJson(path, json);
 }
+
 
 // Remove the fixed values and use these formulas instead
 void updateChemistryConstants() {
@@ -2061,6 +2036,9 @@ void handleApiHistory(){
   server.send(200, "application/json", json);
 }
 
+
+
+
 void updateChemistryMath() {
     // If volume is 0, default to 300g (1135.6L) to prevent math errors
     if (TANK_VOLUME_L <= 0) TANK_VOLUME_L = 1135.6f;
@@ -2076,6 +2054,7 @@ void updateChemistryMath() {
 
     Serial.printf("Tank updated to %.1fL. New Kalk impact: %.6f dKH/ml\n", TANK_VOLUME_L, DKH_PER_ML_KALK_TANK);
 }
+
 
 // ===================== SETUP & LOOP =====================
 
@@ -2126,6 +2105,7 @@ validateFlow("TBD",  FLOW_TBD_ML_PER_MIN,   50.0f);
 
   // Allow insecure HTTPS for Firebase
   secureClient.setInsecure();
+
 
   // NTP time sync
   configTime(GMT_OFFSET_SEC, DST_OFFSET_SEC, NTP_SERVER);
@@ -2185,12 +2165,13 @@ void loop(){
 
   // Periodically poll Firebase commands (resetAi, liveDose, otaRequest)
   static unsigned long lastFirebasePollMs = 0;
-  if (nowMs - lastFirebasePollMs >= 600000UL) { // every ~10s
+  if (nowMs - lastFirebasePollMs >= 10000UL) { // every ~10s
     lastFirebasePollMs = nowMs;
     firebaseCheckAndHandleResetAi();
     firebaseCheckAndHandleLiveDose();
     firebaseCheckAndHandleOtaRequest();
     firebaseCheckAndHandleCalibrate();
+    firebaseSendStateHeartbeat();
     firebaseSyncDoseScheduleOnce();
     firebaseSyncTankSize();
     checkEmergencyStop();
