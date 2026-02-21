@@ -10,6 +10,7 @@
 #include <ArduinoJson.h>
 #include <stdint.h>
 #include <Preferences.h>
+#include <nvs_flash.h>
 
 // Forward declarations used by helpers
 uint64_t getEpochMillis();
@@ -50,8 +51,8 @@ bool globalEmergencyStop = false; // If true, no pumps can move.
 // ===================== FIREBASE (REST API) =====================
 
 const char* FIREBASE_DB_URL = "https://aidoser-default-rtdb.firebaseio.com";
-const char* DEVICE_ID       = "reefDoser6";   // 👈 must match your DB path
-const char* FW_VERSION      = "1.0.4";  // 👈 bump when you flash new firmware
+const char* DEVICE_ID       = "reefDoser1";   // 👈 must match your DB path
+const char* FW_VERSION      = "1.0.5";  // 👈 bump when you flash new firmware
  
 
 // Add these to your global variables at the top
@@ -64,6 +65,8 @@ const float MIN_DOSE_SEC = 1.0f; // Minimum time we allow a pump to run
 
 WiFiClientSecure secureClient;
 
+uint64_t lastRemoteTestTimestampMs = 0;
+
 Preferences dosingPrefs;
 
 void firebaseSetCalibrationStatus();
@@ -73,18 +76,24 @@ void syncTimeFromFirebaseHeader();
 
 // Build full Firebase URL from a path (e.g. "/devices/reefDoser1/commands/resetAi")
 String firebaseUrl(const String& path) {
+  String base = path;
+  String query = "";
+
+  int q = base.indexOf('?');
+  if (q >= 0) {
+    query = base.substring(q);     // includes '?'
+    base  = base.substring(0, q);  // path without query
+  }
+
   String url = String(FIREBASE_DB_URL);
   if (!url.endsWith("/")) url += "/";
 
-  if (path.startsWith("/")) {
-    url += path.substring(1);
-  } else {
-    url += path;
-  }
+  if (base.startsWith("/")) url += base.substring(1);
+  else url += base;
 
-  if (!url.endsWith(".json")) {
-    url += ".json";
-  }
+  if (!url.endsWith(".json")) url += ".json";
+
+  url += query; // re-attach query AFTER .json
   return url;
 }
 
@@ -107,6 +116,9 @@ bool firebasePutJson(const String& path, const String& jsonBody) {
     Serial.println("Firebase PUT begin() failed");
     return false;
   }
+  https.setTimeout(30000);   // ms
+  https.setReuse(false);    // optional but recommended
+
 
   https.addHeader("Content-Type", "application/json");
   int code = https.PUT(jsonBody);
@@ -142,6 +154,8 @@ bool firebasePostJson(const String& path, const String& jsonBody) {
     Serial.println("Firebase POST begin() failed");
     return false;
   }
+  https.setTimeout(30000);   // ms
+  https.setReuse(false);    // optional but recommended
 
   https.addHeader("Content-Type", "application/json");
   int code = https.POST(jsonBody);
@@ -203,6 +217,8 @@ String firebaseGetJson(const String& path) {
     Serial.println("Firebase GET begin() failed");
     return result;
   }
+  https.setTimeout(30000);   // ms
+  https.setReuse(false);    // optional but recommended
 
   int code = https.GET();
   if (code != HTTP_CODE_OK) {
@@ -321,6 +337,41 @@ void loadDosingFromPrefs() {
   Serial.println(dosing.ml_per_day_mg);
 }
 
+// Clears persisted pending volumes so plan/schedule changes don't overdose.
+void clearPendingBuckets(const char* why) {
+  Preferences prefs;
+  if (!prefs.begin("doser-buckets", false)) {
+    Serial.println("Prefs: failed to open doser-buckets (clear)");
+    return;
+  }
+  prefs.putFloat("p_kalk", 0.0f);
+  prefs.putFloat("p_afr",  0.0f);
+  prefs.putFloat("p_mg",   0.0f);
+  prefs.putFloat("p_tbd",  0.0f);
+  prefs.end();
+
+  pendingKalkMl = pendingAfrMl = pendingMgMl = pendingTbdMl = 0.0f;
+
+  Serial.print("Pending buckets CLEARED: ");
+  Serial.println(why ? why : "");
+}
+
+
+void initBucketPrefs() {
+  Preferences prefs;
+  if (!prefs.begin("doser-buckets", false)) {
+    Serial.println("Prefs: failed to open doser-buckets (write)");
+    return;
+  }
+
+  // Create keys if missing (prevents NOT_FOUND spam)
+  if (!prefs.isKey("p_kalk")) prefs.putFloat("p_kalk", 0.0f);
+  if (!prefs.isKey("p_afr"))  prefs.putFloat("p_afr",  0.0f);
+  if (!prefs.isKey("p_mg"))   prefs.putFloat("p_mg",   0.0f);
+  if (!prefs.isKey("p_tbd"))  prefs.putFloat("p_tbd",  0.0f);
+
+  prefs.end();
+}
 
 // ===================== FLOW CALIBRATION (NVS PREFS) =====================
 // Persist calibrated pump flow rates so they survive reboots.
@@ -409,7 +460,7 @@ TestPoint lastTest    = {0, 0, 0, 0, 0};
 TestPoint currentTest = {0, 0, 0, 0, 0};
 
 // For Firebase-based AI timing (if we later pull tests from RTDB)
-uint64_t lastRemoteTestTimestampMs = 0;
+
 
 
 // ===================== DOSING SCHEDULE (REAL-TIME, 3 DOSES/DAY) =====================
@@ -1017,6 +1068,7 @@ void resetAIState() {
   dosing.ml_per_day_kalk = 2000.0f;  // 2L/day
   dosing.ml_per_day_afr  = 20.0f;
   dosing.ml_per_day_mg   = 0.0f;
+  dosing.ml_per_day_tbd  = 0.0f;
 
   // Reset safety / timing
   lastSafetyBackoffTs = nowSeconds();
@@ -1171,10 +1223,12 @@ void safetyBackoffIfNoTests() {
   dosing.ml_per_day_kalk *= 0.7f;
   dosing.ml_per_day_afr  *= 0.7f;
   dosing.ml_per_day_mg   *= 0.7f;
+  dosing.ml_per_day_tbd *= 0.7f;
 
   dosing.ml_per_day_kalk = clampf(dosing.ml_per_day_kalk, 0.0f, MAX_KALK_ML_PER_DAY);
   dosing.ml_per_day_afr  = clampf(dosing.ml_per_day_afr,  0.0f, MAX_AFR_ML_PER_DAY);
   dosing.ml_per_day_mg   = clampf(dosing.ml_per_day_mg,   0.0f, MAX_MG_ML_PER_DAY);
+  dosing.ml_per_day_tbd = clampf(dosing.ml_per_day_tbd, 0.0f, MAX_TBD_ML_PER_DAY);
 
   enforceChemSafetyCaps();
   updatePumpSchedules();
@@ -1333,7 +1387,7 @@ void maybeDosePumpsRealTime() {
         float sec = (pendingTbdMl / FLOW_TBD_ML_PER_MIN) * 60.0f;
         if (sec >= MIN_DOSE_SEC) {
           if (giveDose(PIN_PUMP_TBD, sec)) {
-          firebaseLogDoseRun(4, "aux", pendingTbdMl, sec, FLOW_TBD_ML_PER_MIN, "schedule");
+          firebaseLogDoseRun(4, "tbd", pendingTbdMl, sec, FLOW_TBD_ML_PER_MIN, "schedule");
           pendingTbdMl = 0.0f;
         } else {
           Serial.println("E-Stop active: skipped AUX dosing, kept pending volume.");
@@ -1355,6 +1409,54 @@ void maybeDosePumpsRealTime() {
     }
   }
 }
+
+//////////////////////check for new tests ////////////////////
+////////////////////// check for new tests ////////////////////
+void checkForNewTest() {
+  // IMPORTANT: encode quotes as %22 for Firebase REST query params
+  String path = "/devices/" + String(DEVICE_ID) + "/tests?orderBy=%22timestamp%22&limitToLast=1";
+
+  String payload = firebaseGetJson(path);
+  if (payload.length() == 0 || payload == "null") return;
+
+  StaticJsonDocument<768> doc;
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    Serial.println("checkForNewTest: JSON parse error");
+    return;
+  }
+
+  JsonObject root = doc.as<JsonObject>();
+  if (root.size() == 0) return;
+
+  JsonObject test;
+  for (JsonPair kv : root) { test = kv.value().as<JsonObject>(); break; }
+
+  uint64_t ts = test["timestamp"] | 0ULL;
+  if (ts == 0) return;
+  if (ts <= lastRemoteTestTimestampMs) return;
+
+  lastRemoteTestTimestampMs = ts;
+
+  float ca  = test["ca"]  | NAN;
+  float alk = test["alk"] | NAN;
+  float mg  = test["mg"]  | NAN;
+  float ph  = test["ph"]  | NAN;
+
+  if (!isfinite(ca) || !isfinite(alk) || !isfinite(mg) || !isfinite(ph)) {
+    Serial.println("NEW TEST invalid (NaN) -> ignoring");
+    return;
+  }
+
+  Serial.printf("NEW TEST DETECTED ts=%llu ca=%.1f alk=%.2f mg=%.1f ph=%.2f\n",
+                (unsigned long long)ts, ca, alk, mg, ph);
+
+  // Now this will run
+  onNewTestInput(ca, alk, mg, ph, 0.0f);
+}
+///////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////
+
 // ===================== FIREBASE: resetAi COMMAND =====================
 
 // Check /devices/{DEVICE_ID}/commands/resetAi
@@ -1410,8 +1512,8 @@ void runLiveDoseOnce() {
     doseAndLog(3, "mg", PIN_PUMP_MG, ml, FLOW_MG_ML_PER_MIN, "slot");
   }
   if (SEC_PER_DOSE_TBD > 0.0f) {
-    const float ml = (SEC_PER_DOSE_TBD / 60.0f) * FLOW_AUX_ML_PER_MIN;
-    doseAndLog(4, "aux", PIN_PUMP_TBD, ml, FLOW_AUX_ML_PER_MIN, "slot");
+    const float ml = (SEC_PER_DOSE_TBD / 60.0f) * FLOW_TBD_ML_PER_MIN;
+    doseAndLog(4, "tbd", PIN_PUMP_TBD, ml, FLOW_TBD_ML_PER_MIN, "slot");
   }
 
   Serial.println("=== LIVE DOSE COMPLETE ===");
@@ -1559,7 +1661,10 @@ void firebaseSyncDoseScheduleOnce() {
   doseScheduleCfg.everyMin  = clampInt(everyMin,  1, 240);
 
   rebuildScheduleSlots();
+  doseSlotsPrimed = false;
+  primeDoseSlotsForToday();
   updatePumpSchedules(); 
+  clearPendingBuckets("schedule changed");
   
   Serial.println(">>> Schedule update complete.");
 }
@@ -1579,6 +1684,71 @@ int pumpNumToPin(int pump) {
     default: return -1;
   }
 }
+//////////////////////////////////////////////////////////////////////////////////
+// Pull /devices/<id>/settings/dosingMlPerDay and apply if changed.
+// Expected JSON: {"kalk":123,"afr":45,"mg":6,"tbd":0,"updatedAt":123456}
+// Pull /devices/<id>/dosingPlan and apply if changed.
+// Expected JSON: {"kalk":120,"afr":40,"mg":10,"tbd":0, ...}
+// We IGNORE "alk" (it's not a dose; sometimes a string).
+void firebaseSyncDosingPlanOnce() {
+  String path = "/devices/" + String(DEVICE_ID) + "/dosingPlan.json";
+  String payload = firebaseGetJson(path);
+
+  Serial.println("DOSING PLAN payload: " + payload);
+  if (payload.length() == 0 || payload == "null") return;
+
+  StaticJsonDocument<256> doc;
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) return;
+
+  // helper: accept float or string
+  auto readFloat = [&](const char* key, float fallback) -> float {
+    if (!doc.containsKey(key)) return fallback;
+    JsonVariant v = doc[key];
+    if (v.is<float>() || v.is<int>() || v.is<double>()) return (float)v.as<double>();
+    if (v.is<const char*>()) return String(v.as<const char*>()).toFloat();
+    return fallback;
+  };
+
+  float nk = readFloat("kalk", dosing.ml_per_day_kalk);
+  float na = readFloat("afr",  dosing.ml_per_day_afr);
+  float nm = readFloat("mg",   dosing.ml_per_day_mg);
+  float nt = readFloat("tbd",  dosing.ml_per_day_tbd); // optional, default stays
+
+  // Basic sanity
+  if (!isfinite(nk) || nk < 0) nk = dosing.ml_per_day_kalk;
+  if (!isfinite(na) || na < 0) na = dosing.ml_per_day_afr;
+  if (!isfinite(nm) || nm < 0) nm = dosing.ml_per_day_mg;
+  if (!isfinite(nt) || nt < 0) nt = dosing.ml_per_day_tbd;
+
+  // Clamp to safety caps
+  nk = clampf(nk, 0.0f, MAX_KALK_ML_PER_DAY);
+  na = clampf(na, 0.0f, MAX_AFR_ML_PER_DAY);
+  nm = clampf(nm, 0.0f, MAX_MG_ML_PER_DAY);
+  nt = clampf(nt, 0.0f, MAX_TBD_ML_PER_DAY);
+
+  auto diff = [](float a, float b){ return fabsf(a-b); };
+  bool changed =
+      diff(nk, dosing.ml_per_day_kalk) > 0.01f ||
+      diff(na, dosing.ml_per_day_afr)  > 0.01f ||
+      diff(nm, dosing.ml_per_day_mg)   > 0.01f ||
+      diff(nt, dosing.ml_per_day_tbd)  > 0.01f;
+
+  if (!changed) return;
+
+  Serial.printf(">>> Dosing plan UPDATED from /dosingPlan: kalk=%.2f afr=%.2f mg=%.2f tbd=%.2f\n",
+                nk, na, nm, nt);
+
+  dosing.ml_per_day_kalk = nk;
+  dosing.ml_per_day_afr  = na;
+  dosing.ml_per_day_mg   = nm;
+  dosing.ml_per_day_tbd  = nt;
+
+  updatePumpSchedules();
+  saveDosingToPrefs();
+  clearPendingBuckets("plan changed");
+}
+///////////////////////////////////////////////////////////////////////////////
 
 bool firebaseCheckAndHandleCalibrate() {
   if (WiFi.status() != WL_CONNECTED) return false;
@@ -1787,6 +1957,8 @@ bool performOtaFromUrl(const String& url) {
   Serial.println(url);
 
   if (!https.begin(otaClient, url)) {
+    https.setTimeout(30000);
+    https.setReuse(false);
     Serial.println("OTA: https.begin failed");
     firebaseSetOtaStatus("error", "https.begin failed");
     return false;
@@ -2061,6 +2233,7 @@ void updateChemistryMath() {
 void setup(){
   Serial.begin(115200);
   delay(1000);
+  Serial.println("=== RUNNING FW " + String(FW_VERSION) + " on " + String(DEVICE_ID) + " ===");
 
   pinMode(PIN_PUMP_KALK, OUTPUT);
   pinMode(PIN_PUMP_AFR,  OUTPUT);
@@ -2071,6 +2244,10 @@ void setup(){
   digitalWrite(PIN_PUMP_MG,   LOW);
   digitalWrite(PIN_PUMP_TBD,  LOW);
 
+  ///////////////////////clean memory//////////////////////
+  //nvs_flash_erase();
+  //nvs_flash_init();
+  //////////////////////////////////////////////////
   // Load last saved AI dosing plan from NVS (if any)
   loadDosingFromPrefs();
   loadFlowFromPrefs();
@@ -2105,7 +2282,7 @@ validateFlow("TBD",  FLOW_TBD_ML_PER_MIN,   50.0f);
 
   // Allow insecure HTTPS for Firebase
   secureClient.setInsecure();
-
+  initBucketPrefs();
 
   // NTP time sync
   configTime(GMT_OFFSET_SEC, DST_OFFSET_SEC, NTP_SERVER);
@@ -2116,6 +2293,7 @@ validateFlow("TBD",  FLOW_TBD_ML_PER_MIN,   50.0f);
     Serial.println("Time synchronized from NTP");
     // Option A: do NOT catch up on missed slots after a reboot
     primeDoseSlotsForToday();
+    clearPendingBuckets("boot prime");
   }
 
   // Web server routes
@@ -2165,25 +2343,30 @@ void loop(){
 
   // Periodically poll Firebase commands (resetAi, liveDose, otaRequest)
   static unsigned long lastFirebasePollMs = 0;
-  if (nowMs - lastFirebasePollMs >= 10000UL) { // every ~10s
-    lastFirebasePollMs = nowMs;
-    firebaseCheckAndHandleResetAi();
-    firebaseCheckAndHandleLiveDose();
-    firebaseCheckAndHandleOtaRequest();
-    firebaseCheckAndHandleCalibrate();
-    firebaseSendStateHeartbeat();
-    firebaseSyncDoseScheduleOnce();
-    firebaseSyncTankSize();
-    checkEmergencyStop();
+if (nowMs - lastFirebasePollMs >= 10000UL) { // every ~10s
+  lastFirebasePollMs = nowMs;
 
-    struct tm timeinfo;
-    if (getLocalTime(&timeinfo)) {
-        Serial.println(&timeinfo, "--- CLOCK CHECK: %A, %B %d %Y %I:%M:%S %p ---");
-    } else {
-        Serial.println("--- CLOCK CHECK: Time NOT SET (Still 1970) ---");
-    }
+  firebaseCheckAndHandleResetAi();
+  firebaseCheckAndHandleLiveDose();
+  firebaseCheckAndHandleOtaRequest();
+  firebaseCheckAndHandleCalibrate();
 
+  firebaseSyncDoseScheduleOnce();
+  firebaseSyncDosingPlanOnce();
+  firebaseSyncTankSize();
+  checkEmergencyStop();
+  checkForNewTest();
+
+  // NOW publish state after you've applied any new settings
+  firebaseSendStateHeartbeat();
+
+  struct tm timeinfo;
+  if (getLocalTime(&timeinfo)) {
+    Serial.println(&timeinfo, "--- CLOCK CHECK: %A, %B %d %Y %I:%M:%S %p ---");
+  } else {
+    Serial.println("--- CLOCK CHECK: Time NOT SET (Still 1970) ---");
   }
+}
   
 
   // Periodically pull calibration values (ml/min) from RTDB (so ESP32 uses what you saved in UI)
