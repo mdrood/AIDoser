@@ -12,6 +12,12 @@
 #include <Preferences.h>
 #include <nvs_flash.h>
 
+#include "apexapi.h"
+
+//TODO
+////i have teh apex addres set in the lib apexapi no i need to read sensor values
+//and give to AI and give to UI
+
 // Forward declarations used by helpers
 uint64_t getEpochMillis();
 
@@ -51,8 +57,8 @@ bool globalEmergencyStop = false; // If true, no pumps can move.
 // ===================== FIREBASE (REST API) =====================
 
 const char* FIREBASE_DB_URL = "https://aidoser-default-rtdb.firebaseio.com";
-const char* DEVICE_ID       = "reefDoser1";   // 👈 must match your DB path
-const char* FW_VERSION      = "1.0.5";  // 👈 bump when you flash new firmware
+const char* DEVICE_ID       = "reefDoser6";   // 👈 must match your DB path
+const char* FW_VERSION      = "1.0.7";  // 👈 bump when you flash new firmware
  
 
 // Add these to your global variables at the top
@@ -69,10 +75,32 @@ uint64_t lastRemoteTestTimestampMs = 0;
 
 Preferences dosingPrefs;
 
+// ---------------- APEX (Neptune/Trident) config persisted in NVS ----------------
+static const char* APEX_PREF_NS = "apex";
+bool   apexEnabled = false;
+String apexIp = "";
+
 void firebaseSetCalibrationStatus();
 void updateChemistryConstants();
 void syncTimeFromFirebaseHeader();
 
+void pollApexAndPublish(bool allowAiUpdate);
+void onNewTestInput(float ca, float alk, float mg, float ph, float tbd_val);
+
+ApexApi *apexApi;
+
+// ---------------- APEX -> AI ingestion ----------------
+static const uint32_t APEX_UI_POLL_MS = 5UL * 60UL * 1000UL;      // 5 min
+static const uint32_t APEX_AI_MIN_MS  = 12UL * 60UL * 60UL * 1000UL; // 12 hours (use 6h if you want)
+
+uint64_t lastApexUiPollMs = 0;
+uint64_t lastApexAiApplyMs = 0;
+
+// Optional: avoid AI updates if values barely changed (noise filter)
+float lastApexAiCa  = NAN;
+float lastApexAiAlk = NAN;
+float lastApexAiMg  = NAN;
+float lastApexAiPh  = NAN;
 
 // Build full Firebase URL from a path (e.g. "/devices/reefDoser1/commands/resetAi")
 String firebaseUrl(const String& path) {
@@ -96,6 +124,38 @@ String firebaseUrl(const String& path) {
   url += query; // re-attach query AFTER .json
   return url;
 }
+
+/////////////////////apex helper //////////////////////////////////
+static bool inRange(float v, float lo, float hi) {
+  return isfinite(v) && (v >= lo) && (v <= hi);
+}
+
+static bool apexValuesLookValid(float ca, float alk, float mg, float ph) {
+  // match your existing sanity ranges
+  return inRange(ca,  300.0f, 550.0f) &&
+         inRange(alk,   5.0f,  14.0f) &&
+         inRange(mg, 1100.0f, 1600.0f) &&
+         inRange(ph,    7.0f,   9.0f);
+}
+
+// Small change threshold so you don’t AI-update on tiny noise
+static bool apexChangedEnough(float ca, float alk, float mg, float ph) {
+  // Tune these if you want.
+  const float CA_EPS  = 3.0f;    // ppm
+  const float ALK_EPS = 0.10f;   // dKH
+  const float MG_EPS  = 10.0f;   // ppm
+  const float PH_EPS  = 0.03f;   // pH
+
+  if (!isfinite(lastApexAiCa) || !isfinite(lastApexAiAlk) || !isfinite(lastApexAiMg) || !isfinite(lastApexAiPh)) {
+    return true; // first time
+  }
+
+  return (fabsf(ca  - lastApexAiCa)  >= CA_EPS)  ||
+         (fabsf(alk - lastApexAiAlk) >= ALK_EPS) ||
+         (fabsf(mg  - lastApexAiMg)  >= MG_EPS)  ||
+         (fabsf(ph  - lastApexAiPh)  >= PH_EPS);
+}
+/////////////////////////////////////////////////////////////////////////
 
 // Simple PUT JSON helper
 bool firebasePutJson(const String& path, const String& jsonBody) {
@@ -819,6 +879,181 @@ void pushHistory(const TestPoint& tp){
   // return 0;
 }*/
 // )LEGACY
+
+/////////////////////apex/////////////////////////////////////////////////
+static bool isValidIPv4(const String& ip) {
+  int parts = 0;
+  int start = 0;
+  while (true) {
+    int dot = ip.indexOf('.', start);
+    String token = (dot >= 0) ? ip.substring(start, dot) : ip.substring(start);
+    token.trim();
+    if (token.length() == 0) return false;
+    // must be digits only
+    for (size_t i = 0; i < token.length(); i++) {
+      if (!isDigit(token[i])) return false;
+    }
+    int v = token.toInt();
+    if (v < 0 || v > 255) return false;
+    parts++;
+    if (dot < 0) break;
+    start = dot + 1;
+  }
+  return (parts == 4);
+}
+
+static void loadApexFromPrefs() {
+  Preferences p;
+  if (!p.begin(APEX_PREF_NS, true)) {
+    Serial.println("Prefs: failed to open apex (read)");
+    return;
+  }
+  apexEnabled = p.getBool("en", false);
+  apexIp = p.getString("ip", "");
+  p.end();
+
+  Serial.printf("Prefs: APEX loaded en=%s ip=%s\n", apexEnabled ? "true" : "false", apexIp.c_str());
+}
+
+static void saveApexToPrefs(bool en, const String& ip) {
+  Preferences p;
+  if (!p.begin(APEX_PREF_NS, false)) {
+    Serial.println("Prefs: failed to open apex (write)");
+    return;
+  }
+  p.putBool("en", en);
+  p.putString("ip", ip);
+  p.end();
+}
+
+static void applyApexConfig(bool en, const String& ip) {
+  apexEnabled = en;
+  apexIp = ip;
+
+  if (apexApi) {
+    if (apexEnabled && isValidIPv4(apexIp)) {
+      Serial.printf("APEX: enabled, setting IP to %s\n", apexIp.c_str());
+      apexApi->setIpAddr(apexIp);
+    } else {
+      Serial.println("APEX: disabled (or invalid IP). Not setting ApexApi IP.");
+      // Optional: if ApexApi supports "clearing", uncomment:
+      // apexApi->setIpAddr("");
+    }
+  }
+}
+////////////////////////////////////////////////////////////////////////////
+
+/////////////////////////apex sync//////////////////////////////////////////
+void firebaseSyncApexOnce() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  const String path = "/devices/" + String(DEVICE_ID) + "/sensors/Apex.json";
+  String payload = firebaseGetJson(path);
+  if (payload.length() == 0 || payload == "null") return;
+
+  StaticJsonDocument<256> doc;
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    Serial.println("Apex sync: JSON parse error");
+    return;
+  }
+
+  bool en = doc["enable"] | false;
+  const char* ipC = doc["ipAddress"] | "";
+  String ip = String(ipC);
+  ip.trim();
+
+  // If enabled, require valid IP (otherwise treat as disabled)
+  if (en && !isValidIPv4(ip)) {
+    Serial.printf("Apex sync: enable=true but invalid ipAddress='%s' -> ignoring enable\n", ip.c_str());
+    en = false;
+  }
+
+  // Load current stored config (fast) to detect changes
+  bool curEn = apexEnabled;
+  String curIp = apexIp;
+
+  // If different, persist + apply
+  if (en != curEn || ip != curIp) {
+    Serial.printf("Apex sync: change detected. en %d->%d ip '%s'->'%s'\n",
+                  (int)curEn, (int)en, curIp.c_str(), ip.c_str());
+
+    saveApexToPrefs(en, ip);
+    applyApexConfig(en, ip);
+  }
+}
+////////////////////////////////////////////////////////////////////////////
+/////////////////////////apex functions//////////////////////////////////
+void pollApexAndPublish(bool allowAiUpdate) {
+  if (!apexEnabled) return;
+  if (!apexApi) return;
+  if (!isValidIPv4(apexIp)) return;
+
+  // Pull latest values from ApexApi
+  float ph  = apexApi->getPh();
+  float alk = apexApi->getAlk();
+  float ca  = apexApi->getCa();
+  float mg  = apexApi->getMg();
+
+  if (!apexValuesLookValid(ca, alk, mg, ph)) {
+    Serial.printf("APEX read invalid: ca=%.1f alk=%.2f mg=%.1f ph=%.2f\n", ca, alk, mg, ph);
+    return;
+  }
+
+  // 1) Publish to RTDB sensors for UI pills
+  // (you already read /sensors/tempF /sensors/pH /sensors/sg in the UI)
+  firebasePutJson("/devices/" + String(DEVICE_ID) + "/sensors/pH",   String(ph, 2));
+  firebasePutJson("/devices/" + String(DEVICE_ID) + "/sensors/alk",  String(alk, 2));
+  firebasePutJson("/devices/" + String(DEVICE_ID) + "/sensors/ca",   String(ca, 1));
+  firebasePutJson("/devices/" + String(DEVICE_ID) + "/sensors/mg",   String(mg, 1));
+
+  // Optional “last apex snapshot” block
+  {
+    uint64_t ts = getEpochMillis();
+    String json = "{";
+    json += "\"ts\":" + String((unsigned long long)ts) + ",";
+    json += "\"ph\":" + String(ph, 2) + ",";
+    json += "\"alk\":" + String(alk, 2) + ",";
+    json += "\"ca\":" + String(ca, 1) + ",";
+    json += "\"mg\":" + String(mg, 1);
+    json += "}";
+    firebasePutJson("/devices/" + String(DEVICE_ID) + "/state/apexLatest", json);
+  }
+
+  // 2) Optionally feed the AI
+  if (allowAiUpdate) {
+    // Don’t AI-update if changes are tiny (noise) unless it’s the first time.
+    if (!apexChangedEnough(ca, alk, mg, ph)) {
+      Serial.println("APEX: change too small, skipping AI update.");
+      return;
+    }
+
+    Serial.printf("APEX -> AI update: ca=%.1f alk=%.2f mg=%.1f ph=%.2f\n", ca, alk, mg, ph);
+
+    // Call your existing AI ingestion point
+    onNewTestInput(ca, alk, mg, ph, 0.0f);
+
+    // Remember last applied values
+    lastApexAiCa  = ca;
+    lastApexAiAlk = alk;
+    lastApexAiMg  = mg;
+    lastApexAiPh  = ph;
+
+    // (optional) log a “test” into /tests so it shows in history table/chart
+    // If you DO this, you should add a "source":"apex" field so you can filter later.
+    StaticJsonDocument<256> doc;
+    doc["ca"] = ca;
+    doc["alk"] = alk;
+    doc["mg"] = mg;
+    doc["ph"] = ph;
+    doc["timestamp"] = (unsigned long long)getEpochMillis();
+    doc["source"] = "apex";
+    String body;
+    serializeJson(doc, body);
+    firebasePostJson("/devices/" + String(DEVICE_ID) + "/tests", body);
+  }
+}
+////////////////////////////////////////////////////////////////////////////
 
 void syncTimeFromFirebaseHeader() {
   HTTPClient http;
@@ -2244,6 +2479,9 @@ void setup(){
   digitalWrite(PIN_PUMP_MG,   LOW);
   digitalWrite(PIN_PUMP_TBD,  LOW);
 
+  apexApi = new ApexApi();
+  loadApexFromPrefs();
+  applyApexConfig(apexEnabled, apexIp);
   ///////////////////////clean memory//////////////////////
   //nvs_flash_erase();
   //nvs_flash_init();
@@ -2352,6 +2590,7 @@ if (nowMs - lastFirebasePollMs >= 10000UL) { // every ~10s
   firebaseCheckAndHandleCalibrate();
 
   firebaseSyncDoseScheduleOnce();
+  firebaseSyncApexOnce();
   firebaseSyncDosingPlanOnce();
   firebaseSyncTankSize();
   checkEmergencyStop();
@@ -2359,6 +2598,24 @@ if (nowMs - lastFirebasePollMs >= 10000UL) { // every ~10s
 
   // NOW publish state after you've applied any new settings
   firebaseSendStateHeartbeat();
+
+  //////////////////apex schedule//////////////////////////////////////
+  // APEX polling: UI often, AI rarely
+uint64_t now = getEpochMillis();
+if(apexEnabled){
+  // UI publish every 5 minutes
+  if (now - lastApexUiPollMs >= APEX_UI_POLL_MS) {
+    lastApexUiPollMs = now;
+    pollApexAndPublish(false);
+  }
+
+  // AI apply every 12 hours (or 6 hours if you change APEX_AI_MIN_MS)
+  if (now - lastApexAiApplyMs >= APEX_AI_MIN_MS) {
+    lastApexAiApplyMs = now;
+    pollApexAndPublish(true);
+  }
+}
+  ////////////////////////////////////////////////////////////////////
 
   struct tm timeinfo;
   if (getLocalTime(&timeinfo)) {
