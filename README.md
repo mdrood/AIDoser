@@ -1,6 +1,10 @@
 Mark plug 6, Eric's middle 2, Jeff's last 5
 
 
+firebase deploy --only hosting,database
+
+
+
 Steps for OTA:
 THE CHIP HAS TO BE BURNED WITH THE DEVICEID SET TO reefDoser1,2,3,4,5,etc
  build the scetch and find in under C:\Users\mdroo\OneDrive\Documents\platformio\AIDoser\.pio\build\esp32doit-devkit-v1/firmware.bin
@@ -314,3 +318,7 @@ good for SPS uptake rates
 
 
 firebase deploy
+
+////////////////notifications //////////////////////////
+
+on iphone insall ntfi:

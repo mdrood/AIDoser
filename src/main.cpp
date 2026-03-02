@@ -13,6 +13,7 @@
 #include <nvs_flash.h>
 
 #include "apexapi.h"
+#include <esp_wifi.h>
 
 //TODO
 ////i have teh apex addres set in the lib apexapi no i need to read sensor values
@@ -46,7 +47,17 @@ const char MAIN_PAGE_HTML[] PROGMEM = R"rawliteral(
 //const char* WIFI_PASSWORD = "Frinov25!+!";
 WiFiManager wm;
 
+  String ntfiUrl;
+
 WebServer server(80);
+///////////////////////////////////////////////////////////////////////////////////////
+///////////////////!!!!!!!!!!!!!things you must change////////////////////////////////
+char DEVICE_ID[] = "reefDoser5";          // Example ID
+char TOPIC_SUFFIX[] = "jeffrood";      // Your new variable suffix 8F3K2P
+char NTFY_TOPIC[64];
+const char* FW_VERSION      = "2.0.1";  // 👈 bump when you flash new firmware
+bool   apexEnabled = true;
+////////////////////////////////////////////////////////////////////////////////////////
 
 // NTP server and timezone (Central Time / Chicago)
 const char* NTP_SERVER     = "pool.ntp.org";
@@ -57,8 +68,8 @@ bool globalEmergencyStop = false; // If true, no pumps can move.
 // ===================== FIREBASE (REST API) =====================
 
 const char* FIREBASE_DB_URL = "https://aidoser-default-rtdb.firebaseio.com";
-const char* DEVICE_ID       = "reefDoser6";   // 👈 must match your DB path
-const char* FW_VERSION      = "1.0.7";  // 👈 bump when you flash new firmware
+//const char* DEVICE_ID       = "reefDoser"+DEVICE_NUMBER;   // 👈 must match your DB path
+//const char* FW_VERSION      = "2.0.1";  // 👈 bump when you flash new firmware
  
 
 // Add these to your global variables at the top
@@ -77,11 +88,10 @@ Preferences dosingPrefs;
 
 // ---------------- APEX (Neptune/Trident) config persisted in NVS ----------------
 static const char* APEX_PREF_NS = "apex";
-bool   apexEnabled = false;
+
 String apexIp = "";
 
 void firebaseSetCalibrationStatus();
-void updateChemistryConstants();
 void syncTimeFromFirebaseHeader();
 
 void pollApexAndPublish(bool allowAiUpdate);
@@ -90,17 +100,125 @@ void onNewTestInput(float ca, float alk, float mg, float ph, float tbd_val);
 ApexApi *apexApi;
 
 // ---------------- APEX -> AI ingestion ----------------
-static const uint32_t APEX_UI_POLL_MS = 5UL * 60UL * 1000UL;      // 5 min
-static const uint32_t APEX_AI_MIN_MS  = 12UL * 60UL * 60UL * 1000UL; // 12 hours (use 6h if you want)
+static const uint32_t APEX_AI_MIN_MS   = 12UL * 60UL * 60UL * 1000UL; // 12 hours (AI dosing adjustments)
+static const uint32_t APEX_POLL_MIN_MS = 5UL  * 60UL * 1000UL;        // 5 minutes (publish sensor readings)
 
-uint64_t lastApexUiPollMs = 0;
-uint64_t lastApexAiApplyMs = 0;
+uint64_t lastApexAiApplyMs  = 0;
+uint64_t lastApexPollMs     = 0;
 
 // Optional: avoid AI updates if values barely changed (noise filter)
 float lastApexAiCa  = NAN;
 float lastApexAiAlk = NAN;
 float lastApexAiMg  = NAN;
 float lastApexAiPh  = NAN;
+
+///////////////////////////wifi keep alive fix ///////////////////////////
+
+//////////////////////////////////new notificaitn/////////////////////////////
+// ===================== PUSH (NTFY) =====================
+// Create ONE topic per device. Anyone subscribed to this topic gets this device's notifications.
+static const char* NTFY_HOST  = "ntfy.sh";
+static const int   NTFY_PORT  = 443;
+
+// Make this unique per device (recommended: include a random suffix)
+//char* NTFY_TOPIC ;
+
+// Optional: If you set an access token in ntfy, put it here.
+// If empty, it will still work, but anyone who knows the topic could publish.
+static const char* NTFY_TOKEN = "";  // e.g. "tk_xxxxxxxxxxxxxxxxx"
+//////////////////////////////////////////////////////////////////////////////////////
+
+
+static uint32_t gLastWifiOkMs = 0;
+static uint32_t gNextWifiAttemptMs = 0;
+static uint8_t  gWifiFailCount = 0;
+
+// Call once after WiFi.begin(...)
+void wifiTuningInit() {
+  WiFi.persistent(false);
+  WiFi.setAutoReconnect(true);
+
+  // Biggest stability win on many routers:
+  WiFi.setSleep(false);
+  esp_wifi_set_ps(WIFI_PS_NONE);
+
+  gLastWifiOkMs = millis();
+  gNextWifiAttemptMs = 0;
+  gWifiFailCount = 0;
+}
+
+static void wifiHardResetAndReconnect() {
+  Serial.println("WIFI: hard reset + reconnect");
+
+  // Stop everything WiFi related
+  WiFi.disconnect(true, true);
+  delay(200);
+
+  // Reset radio
+  esp_wifi_stop();
+  delay(200);
+  esp_wifi_start();
+  delay(200);
+
+  // Start connect again (WiFiManager usually stores creds)
+  WiFi.reconnect();
+
+  gWifiFailCount++;
+}
+
+// Call this very often (each loop)
+void wifiKeepAliveTick() {
+  const uint32_t now = millis();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    gLastWifiOkMs = now;
+    gWifiFailCount = 0;
+    return;
+  }
+
+  // Don't hammer
+  if (now < gNextWifiAttemptMs) return;
+
+  // Backoff: 2s, 5s, 10s, 20s, 30s...
+  uint32_t backoff = 2000;
+  if (gWifiFailCount == 1) backoff = 5000;
+  else if (gWifiFailCount == 2) backoff = 10000;
+  else if (gWifiFailCount == 3) backoff = 20000;
+  else backoff = 30000;
+
+  gNextWifiAttemptMs = now + backoff;
+
+  // If we've been offline > 30s, do a hard reset of WiFi
+  if (now - gLastWifiOkMs > 30000) {
+    wifiHardResetAndReconnect();
+  } else {
+    Serial.println("WIFI: reconnect()");
+    WiFi.reconnect();
+    gWifiFailCount++;
+  }
+
+  Serial.print("WIFI: status=");
+  Serial.print((int)WiFi.status());
+  Serial.print(" failCount=");
+  Serial.print(gWifiFailCount);
+  Serial.println();
+}
+
+static void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+  switch (event) {
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      Serial.printf("WIFI EVENT: disconnected, reason=%d\n", info.wifi_sta_disconnected.reason);
+      break;
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+      Serial.print("WIFI EVENT: got ip: ");
+      Serial.println(WiFi.localIP());
+      break;
+    default:
+      break;
+  }
+}
+/////////////////////////////////////////////////////////////////////////
+
 
 // Build full Firebase URL from a path (e.g. "/devices/reefDoser1/commands/resetAi")
 String firebaseUrl(const String& path) {
@@ -193,6 +311,45 @@ bool firebasePutJson(const String& path, const String& jsonBody) {
 
   https.end();
   return true;
+}
+
+
+// Simple PATCH JSON helper (returns true on success)
+bool firebasePatchJson(const String& path, const String& jsonBody) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Firebase PATCH: WiFi not connected");
+    return false;
+  }
+
+  HTTPClient https;
+  String url = firebaseUrl(path);
+
+  if (!https.begin(secureClient, url)) {
+    Serial.println("Firebase PATCH begin() failed");
+    return false;
+  }
+
+  https.setTimeout(30000);
+  https.setReuse(false);
+  https.addHeader("Content-Type", "application/json");
+
+  Serial.println("Firebase PATCH: " + url);
+  Serial.println("Body: " + jsonBody);
+
+  int code = https.sendRequest("PATCH", (uint8_t*)jsonBody.c_str(), jsonBody.length());
+  if (code > 0) {
+    String resp = https.getString();
+    if (code >= 200 && code < 300) {
+      https.end();
+      return true;
+    }
+    Serial.printf("Firebase PATCH error code: %d\n", code);
+    Serial.println(resp);
+  } else {
+    Serial.printf("Firebase PATCH failed: %s\n", https.errorToString(code).c_str());
+  }
+  https.end();
+  return false;
 }
 
 // Simple POST JSON helper (for alerts, pushes, etc.)
@@ -322,7 +479,6 @@ float FLOW_TBD_ML_PER_MIN   = 50.0f;
 
 
 
-float FLOW_AUX_ML_PER_MIN = 0.0f;   // Pump 4 (optional)
 // ===================== CHEMISTRY CONSTANTS =====================
 
 // ---------- KALKWASSER (saturated) ----------
@@ -446,7 +602,7 @@ void loadFlowFromPrefs() {
   FLOW_AFR_ML_PER_MIN  = dosingPrefs.getFloat("fa", FLOW_AFR_ML_PER_MIN);
   FLOW_MG_ML_PER_MIN   = dosingPrefs.getFloat("fm", FLOW_MG_ML_PER_MIN);
   FLOW_TBD_ML_PER_MIN  = dosingPrefs.getFloat("fx", FLOW_TBD_ML_PER_MIN);
-  FLOW_AUX_ML_PER_MIN = FLOW_TBD_ML_PER_MIN; // alias for legacy code
+  FLOW_TBD_ML_PER_MIN = FLOW_TBD_ML_PER_MIN; // alias for legacy code
 
   dosingPrefs.end();
 
@@ -464,7 +620,7 @@ void loadFlowFromPrefs() {
 
 static void validateFlow(const char* name, float &flow, float fallback) {
   // Reasonable range for typical dosing pumps (ml/min). Adjust if needed.
-  if (!isfinite(flow) || flow < 30.0f || flow > 5000.0f) {
+  if (!isfinite(flow) || flow < 0.5f || flow > 2000.0f) {
     Serial.printf("Prefs: %s flow %.2f is invalid. Using fallback %.2f\n", name, flow, fallback);
     flow = fallback;
   }
@@ -697,6 +853,39 @@ static void rebuildScheduleSlots() {
   Serial.printf("DoseSchedule rebuilt: %d slots total.\n", DOSE_SLOTS_PER_DAY);
 }
 
+/////////////////////////////new notification/////////////////////////////////////
+bool sendNtfy(const String& title,
+              const String& message,
+              int priority = 3,              // 1=min ... 5=max
+              const String& tags = "") {      // e.g. "warning,skull"
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  WiFiClientSecure client;
+  client.setInsecure(); // simplest; later you can pin CA if you want
+
+  HTTPClient https;
+
+
+  if (!https.begin(client, ntfiUrl)) return false;
+
+  // ntfy uses headers for title/priority/tags
+  https.addHeader("Title", title);
+  https.addHeader("Priority", String(priority));
+  if (tags.length()) https.addHeader("Tags", tags);
+
+  // Optional token auth (recommended if you want publish locked down)
+  if (String(NTFY_TOKEN).length() > 0) {
+    https.addHeader("Authorization", String("Bearer ") + NTFY_TOKEN);
+  }
+
+  // Body is the message
+  int code = https.POST((uint8_t*)message.c_str(), message.length());
+  https.end();
+
+  return (code >= 200 && code < 300);
+}
+//////////////////////////////////////////////////////////////////////////////////
+
 // On boot/restart, we do NOT want to "catch up" on earlier slots.
 // When time becomes valid, mark any already-passed slots as done.
 void primeDoseSlotsForToday() {
@@ -790,7 +979,7 @@ float adjustWithLimit(float current, float suggested){
 void updatePumpSchedules() {
   // Use DOSE_SLOTS_PER_DAY (the actual active slots) instead of the hardcoded '3'
   int activeSlots = (doseScheduleCfg.enabled) ? DOSE_SLOTS_PER_DAY : 3;
-
+  if (activeSlots < 1) activeSlots = 1;
   if(FLOW_KALK_ML_PER_MIN > 0 && activeSlots > 0){
     float secondsPerDay = (dosing.ml_per_day_kalk / FLOW_KALK_ML_PER_MIN) * 60.0f;
     SEC_PER_DOSE_KALK = secondsPerDay / activeSlots;
@@ -988,12 +1177,16 @@ void pollApexAndPublish(bool allowAiUpdate) {
   if (!apexEnabled) return;
   if (!apexApi) return;
   if (!isValidIPv4(apexIp)) return;
+  String ret = apexApi->getState();
+  Serial.println(ret);
 
   // Pull latest values from ApexApi
   float ph  = apexApi->getPh();
   float alk = apexApi->getAlk();
   float ca  = apexApi->getCa();
   float mg  = apexApi->getMg();
+  float cond = apexApi->getCond();
+  float tempF = apexApi->getTempF();
 
   if (!apexValuesLookValid(ca, alk, mg, ph)) {
     Serial.printf("APEX read invalid: ca=%.1f alk=%.2f mg=%.1f ph=%.2f\n", ca, alk, mg, ph);
@@ -1002,10 +1195,21 @@ void pollApexAndPublish(bool allowAiUpdate) {
 
   // 1) Publish to RTDB sensors for UI pills
   // (you already read /sensors/tempF /sensors/pH /sensors/sg in the UI)
-  firebasePutJson("/devices/" + String(DEVICE_ID) + "/sensors/pH",   String(ph, 2));
-  firebasePutJson("/devices/" + String(DEVICE_ID) + "/sensors/alk",  String(alk, 2));
-  firebasePutJson("/devices/" + String(DEVICE_ID) + "/sensors/ca",   String(ca, 1));
-  firebasePutJson("/devices/" + String(DEVICE_ID) + "/sensors/mg",   String(mg, 1));
+// Write sensors as a single PATCH so the /sensors node always exists (and reduces writes)
+{
+  String sensorsPatch = String("{") +
+    "\"pH\":"   + String(ph, 2) + "," +
+    "\"alk\":"  + String(alk, 2) + "," +
+    "\"ca\":"   + String(ca, 1) + "," +
+    "\"mg\":"   + String(mg, 1) + "," +
+    "\"tempF\":" + String(tempF, 2) + "," +
+    "\"temp\":"  + String(tempF, 2) + "," +   // legacy key some UIs use
+    "\"sg\":"   + String(cond, 2) +
+  "}";
+  firebasePatchJson("/devices/" + String(DEVICE_ID) + "/sensors", sensorsPatch);
+}
+
+// (or convert cond->sg here if you have that logic)
 
   // Optional “last apex snapshot” block
   {
@@ -1056,26 +1260,41 @@ void pollApexAndPublish(bool allowAiUpdate) {
 ////////////////////////////////////////////////////////////////////////////
 
 void syncTimeFromFirebaseHeader() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
   HTTPClient http;
-  // Use your actual Firebase URL
-  http.begin("https://aidoser-default-rtdb.firebaseio.com/.json"); 
-  
+  WiFiClientSecure tmp;
+  tmp.setInsecure();
+
   const char* headerKeys[] = {"Date"};
   http.collectHeaders(headerKeys, 1);
 
+  if (!http.begin(tmp, "https://aidoser-default-rtdb.firebaseio.com/.json")) {
+    Serial.println("Firebase header time sync: begin failed");
+    return;
+  }
+
+  http.setTimeout(8000);
+  http.setReuse(false);
+
   int httpCode = http.GET();
   if (httpCode > 0) {
-    String dateStr = http.header("Date"); // Looks like: "Wed, 21 Oct 2023 07:28:00 GMT"
-    
-    struct tm tm;
-    // This parses the standard web time format into the ESP32 time structure
+    String dateStr = http.header("Date");
+    struct tm tm {};
     if (strptime(dateStr.c_str(), "%a, %d %b %Y %H:%M:%S GMT", &tm)) {
-      time_t t = mktime(&tm);
-      
-      // Apply the time to the system
-      struct timeval tv = { .tv_sec = t };
+      tm.tm_isdst = -1;             // let libc decide DST if it can
+      time_t tLocal = mktime(&tm);  // interpreted as LOCAL time
+
+      // Convert "local interpreted" -> true UTC epoch using your configured offsets
+      // When DST is active, the local offset is (GMT_OFFSET_SEC + DST_OFFSET_SEC)
+      // When DST is not active, it's just GMT_OFFSET_SEC
+      // We'll assume current DST setting (good enough for fallback).
+      const long localOffset = GMT_OFFSET_SEC + DST_OFFSET_SEC;
+
+      time_t tUtc = tLocal - localOffset;
+
+      struct timeval tv = { .tv_sec = tUtc, .tv_usec = 0 };
       settimeofday(&tv, NULL);
-      
       Serial.println("System clock updated via Firebase Header: " + dateStr);
     }
   }
@@ -1163,71 +1382,9 @@ String jsonEscape(const String& s) {
   return out;
 }
 
-// Helper: push an alert into Firebase RTDB under /devices/{DEVICE_ID}/alerts
-// This replaces the old IFTTT push usage – your Cloud Function can listen
-// to /devices/{deviceId}/alerts and fan out SMS / email.
-
-// Helper: push an alert into Firebase RTDB.
-// To stop the DB growing out of control:
-//  1) Always overwrite a "latest" slot: /devices/{DEVICE_ID}/alertsLatest/{type}
-//  2) Optionally POST into /devices/{DEVICE_ID}/alerts (history) only if throttle allows.
-void firebasePushAlert(const String& type,
-                       const String& title,
-                       const String& body,
-                       const String& extra,
-                       const char* throttleKey,
-                       uint64_t cooldownMs) {
-  uint64_t ts = getEpochMillis();
-
-  String json = "{";
-  json += "\"type\":\"" + jsonEscape(type) + "\"";
-  json += ",\"title\":\"" + jsonEscape(title) + "\"";
-  json += ",\"body\":\"" + jsonEscape(body) + "\"";
-  json += ",\"extra\":\"" + jsonEscape(extra) + "\"";
-  json += ",\"deviceId\":\"" + String(DEVICE_ID) + "\"";
-  json += ",\"timestamp\":" + String((unsigned long long)ts);
-  json += "}";
-
-  // Overwrite latest
-  firebasePutJson("/devices/" + String(DEVICE_ID) + "/alertsLatest/" + type, json);
-
-  // Push to history only occasionally
-  if (allowThrottled(throttleKey ? throttleKey : "generic_alert", cooldownMs)) {
-    firebasePostJson("/devices/" + String(DEVICE_ID) + "/alerts", json);
-  }
-}
 
 
-// Helper: push a PUSH notification into Firebase RTDB under
-// /devices/{DEVICE_ID}/notifications (Cloud Function listens for child create)
-bool firebasePushNotification(const String& severity,
-                              const String& title,
-                              const String& body) {
-  String path = "/devices/" + String(DEVICE_ID) + "/notifications";
 
-  uint64_t ts = getEpochMillis();
-
-  String json = "{";
-  json += "\"severity\":\"" + jsonEscape(severity) + "\"";
-  json += ",\"title\":\"" + jsonEscape(title) + "\"";
-  json += ",\"body\":\"" + jsonEscape(body) + "\"";
-  json += ",\"deviceId\":\"" + String(DEVICE_ID) + "\"";
-  json += ",\"ts\":" + String((unsigned long long)ts);
-  json += "}";
-
-  // POST -> creates a unique key each time (required for onCreate trigger)
-  return firebasePostJson(path, json);
-}
-
-// Throttled push notification helper (reduces spam).
-bool firebasePushNotificationThrottled(const char* throttleKey,
-                                      uint64_t cooldownMs,
-                                      const String& severity,
-                                      const String& title,
-                                      const String& body) {
-  if (!allowThrottled(throttleKey ? throttleKey : "generic_alert", cooldownMs)) return false;
-  return firebasePushNotification(severity, title, body);
-}
 
 
 
@@ -1276,13 +1433,17 @@ void enforceChemSafetyCaps() {
     Serial.println(scale, 3);
 
     // Firebase alert: dosing scaled by safety
-    firebasePushAlert("safety",
+    /*firebasePushAlert("safety",
                       "Dosing scaled by safety",
                       "scale=" + String(scale, 3),
                       getLocalTimeString(),
                       "safety_scale",
-                      6ULL*60ULL*60ULL*1000ULL);  // 6 hours
+                      6ULL*60ULL*60ULL*1000ULL);*/
   }
+  sendNtfy("Dsing is Scaled back",
+         String(DEVICE_ID) + "Dosing Scaled by safety",
+         3,
+         "Warning");
 }
 
 
@@ -1316,14 +1477,18 @@ void resetAIState() {
   saveDosingToPrefs();
 
   // Optional: Firebase alert for AI reset
-  firebasePushAlert("reset",
+  /*firebasePushAlert("reset",
                     "AI dosing engine reset",
                     WiFi.localIP().toString(),
                     getLocalTimeString(),
                     "generic_alert",
                     30ULL*60ULL*1000ULL);  // 30 min
 
-  Serial.println("AI state reset complete.");
+  Serial.println("AI state reset complete.");*/
+    sendNtfy("Reset AI",
+         String(DEVICE_ID) + "AI Reset",
+         3,
+         "Warning");
 }
 
 
@@ -1474,12 +1639,17 @@ void safetyBackoffIfNoTests() {
   lastSafetyBackoffTs = now;
 
   // Firebase alert: no tests + backoff
-  firebasePushAlert("safety",
+  /*firebasePushAlert("safety",
                     "No tests >5 days",
                     "Dosing backed off to 70%",
                     getLocalTimeString(),
                     "no_tests",
-                    24ULL*60ULL*60ULL*1000ULL);
+                    24ULL*60ULL*60ULL*1000ULL);*/
+      sendNtfy("No Inputs",
+         String(DEVICE_ID) + "NO manual inputs or sensor reading For > 5 days",
+         3,
+         "Warning");
+  
 }
 
 
@@ -1550,8 +1720,14 @@ void maybeDosePumpsRealTime() {
   if (doseScheduleCfg.enabled) {
     nowIdx = scheduleSlotIndex(timeinfo, doseScheduleCfg.startHour, doseScheduleCfg.endHour, doseScheduleCfg.everyMin);
   } else {
-    // legacy window logic...
+  // legacy slots: find exact slot match by hour/min
+  for (int i = 0; i < 3; i++) {
+    if (timeinfo.tm_hour == DOSE_HOURS[i] && timeinfo.tm_min == DOSE_MINUTES[i]) {
+      nowIdx = i;
+      break;
+    }
   }
+}
 
   // --- ACCUMULATION DOSING LOGIC WITH MEMORY ---
   if (nowIdx >= 0 && nowIdx < DOSE_SLOTS_PER_DAY) {
@@ -1559,7 +1735,10 @@ void maybeDosePumpsRealTime() {
       
       // 1. LOAD current buckets from permanent memory
       Preferences prefs;
-      prefs.begin("doser-buckets", false); // false = read/write mode
+      if (!prefs.begin("doser-buckets", false)) {
+        Serial.println("Prefs: failed to open doser-buckets");
+        return;
+      }
       pendingKalkMl = prefs.getFloat("p_kalk", 0.0f);
       pendingAfrMl  = prefs.getFloat("p_afr", 0.0f);
       pendingMgMl   = prefs.getFloat("p_mg", 0.0f);
@@ -1670,6 +1849,14 @@ void checkForNewTest() {
   uint64_t ts = test["timestamp"] | 0ULL;
   if (ts == 0) return;
   if (ts <= lastRemoteTestTimestampMs) return;
+
+  // Only treat MANUAL entries as "new tests" for AI adjustment.
+  // Apex (sensor) entries may also be logged under /tests for history, but should not trigger dosing logic.
+  String srcType = String(test["source"] | "");
+  if (srcType.equalsIgnoreCase("apex")) {
+    lastRemoteTestTimestampMs = ts; // advance so we don't re-process it every loop
+    return;
+  }
 
   lastRemoteTestTimestampMs = ts;
 
@@ -2118,7 +2305,7 @@ bool firebaseSyncFlowCalibrationOnce() {
   FLOW_AFR_ML_PER_MIN  = fa;
   FLOW_MG_ML_PER_MIN   = fm;
   FLOW_TBD_ML_PER_MIN  = fx;
-  FLOW_AUX_ML_PER_MIN  = fx; // keep in sync (legacy)
+  FLOW_TBD_ML_PER_MIN  = fx; // keep in sync (legacy)
 
   if (changed) {
     Serial.print("Flow updated from RTDB: KALK=");
@@ -2128,7 +2315,7 @@ bool firebaseSyncFlowCalibrationOnce() {
     Serial.print(" MG=");
     Serial.print(FLOW_MG_ML_PER_MIN);
     Serial.print(" AUX=");
-    Serial.println(FLOW_AUX_ML_PER_MIN);
+    Serial.println(FLOW_TBD_ML_PER_MIN);
     saveFlowToPrefs();
     firebaseSetCalibrationStatus();
   }
@@ -2150,7 +2337,7 @@ void firebaseSetCalibrationStatus() {
   json += "\"kalk\":" + String(FLOW_KALK_ML_PER_MIN, 2) + ",";
   json += "\"afr\":" + String(FLOW_AFR_ML_PER_MIN, 2) + ",";
   json += "\"mg\":" + String(FLOW_MG_ML_PER_MIN, 2) + ",";
-  json += "\"aux\":" + String(FLOW_AUX_ML_PER_MIN, 2);
+  json += "\"aux\":" + String(FLOW_TBD_ML_PER_MIN, 2);
   json += "}";
   json += "}";
   firebasePutJson(path, json);
@@ -2293,6 +2480,137 @@ void firebaseCheckAndHandleOtaRequest() {
   performOtaFromUrl(myCorrectUrl); 
 }
 
+
+// ===================== FAST COMMAND POLL (single GET for /commands) =====================
+// To reduce RTDB reads, we fetch /commands.json once and handle everything from that blob.
+void firebasePollCommandsFast() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  const String base = "/devices/" + String(DEVICE_ID) + "/commands";
+  const String payload = firebaseGetJson(base); // firebaseGetJson appends .json
+  if (payload.length() == 0 || payload == "null") return;
+
+  StaticJsonDocument<1536> doc;
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    Serial.println("Commands: JSON parse error, ignoring this poll");
+    return;
+  }
+
+  JsonObject root = doc.as<JsonObject>();
+  if (root.isNull()) return;
+
+  // ---- resetAi (bool) ----
+  if (root.containsKey("resetAi") && root["resetAi"].is<bool>() && root["resetAi"].as<bool>() == true) {
+    resetAIState();
+    firebasePutJson(base + "/resetAi", "false");
+    Serial.println("resetAi handled and cleared.");
+  } else if (root.containsKey("resetAi") && root["resetAi"].is<const char*>()) {
+    // Sometimes written as "true"
+    String v = String(root["resetAi"].as<const char*>());
+    v.toLowerCase();
+    if (v == "true") {
+      resetAIState();
+      firebasePutJson(base + "/resetAi", "false");
+      Serial.println("resetAi handled (string) and cleared.");
+    }
+  }
+
+  // ---- liveDose (object) ----
+  if (root.containsKey("liveDose") && root["liveDose"].is<JsonObject>()) {
+    JsonObject ld = root["liveDose"].as<JsonObject>();
+    bool trigger = ld["trigger"] | false;
+    if (trigger) {
+      int pump = ld["pump"] | 0;
+      float ml = ld["ml"] | 0.0f;
+
+      // Safety sanity checks
+      if (pump < 1 || pump > 4 || ml <= 0.0f) {
+        Serial.println("LiveDose: invalid pump/ml, clearing trigger");
+        String clearJson = "{\"trigger\":false,\"lastRun\":" + String((unsigned long long)getEpochMillis()) + "}";
+        firebasePutJson(base + "/liveDose", clearJson);
+      } else {
+        int pin = pumpNumToPin(pump);
+        float flow = 0.0f;
+        String pumpName;
+        switch (pump) {
+          case 1: flow = FLOW_KALK_ML_PER_MIN; pumpName = "kalk"; break;
+          case 2: flow = FLOW_AFR_ML_PER_MIN;  pumpName = "afr";  break;
+          case 3: flow = FLOW_MG_ML_PER_MIN;   pumpName = "mg";   break;
+          case 4: flow = FLOW_TBD_ML_PER_MIN;  pumpName = "tbd";  break;
+        }
+
+        if (pin < 0 || flow <= 0.0f) {
+          Serial.println("LiveDose: invalid pin/flow, clearing trigger");
+          String clearJson = "{\"trigger\":false,\"lastRun\":" + String((unsigned long long)getEpochMillis()) + "}";
+          firebasePutJson(base + "/liveDose", clearJson);
+        } else {
+          const float maxMl = 2000.0f;
+          if (ml > maxMl) ml = maxMl;
+
+          Serial.printf("LiveDose: pump %d (%s) pin %d, %.2f ml @ %.2f ml/min\n",
+                        pump, pumpName.c_str(), pin, ml, flow);
+
+          doseAndLog(pump, pumpName, pin, ml, flow, "live");
+
+          StaticJsonDocument<128> out;
+          out["trigger"] = false;
+          out["lastRun"] = (unsigned long long)getEpochMillis();
+          out["pump"] = pump;
+          out["ml"] = ml;
+          String clearJson;
+          serializeJson(out, clearJson);
+          firebasePutJson(base + "/liveDose", clearJson);
+        }
+      }
+    }
+  }
+
+  // ---- otaRequest (any non-null triggers) ----
+  // We ignore the payload URL and force the device-specific URL.
+  if (root.containsKey("otaRequest") && !root["otaRequest"].isNull()) {
+    Serial.println("OTA Trigger command detected!");
+    String myCorrectUrl = "https://aidoser.web.app/devices/" + String(DEVICE_ID) + "/firmware.bin";
+    Serial.print("Forcing update from: ");
+    Serial.println(myCorrectUrl);
+
+    // Clear first to avoid loops
+    firebasePutJson(base + "/otaRequest", "null");
+    performOtaFromUrl(myCorrectUrl);
+  }
+
+  // ---- calibrate (object) ----
+  if (root.containsKey("calibrate") && root["calibrate"].is<JsonObject>()) {
+    JsonObject cal = root["calibrate"].as<JsonObject>();
+    bool trigger = cal["trigger"] | false;
+    if (trigger) {
+      int pump = cal["pump"] | 1;
+      int durationSec = cal["durationSec"] | 60;
+      durationSec = clampInt(durationSec, 1, 300);
+
+      int pin = pumpNumToPin(pump);
+      if (pin < 0) {
+        Serial.println("Calibrate: invalid pump number");
+      } else {
+        Serial.printf("Calibrate: running pump %d on pin %d for %d sec...\n", pump, pin, durationSec);
+        giveDose(pin, (float)durationSec);
+        Serial.println("Calibrate: done.");
+      }
+
+      // Clear trigger and write lastRun
+      uint64_t tsMs = getEpochMillis();
+      String clearJson = "{";
+      clearJson += "\"trigger\":false,";
+      clearJson += "\"lastRun\":" + String((unsigned long long)tsMs) + ",";
+      clearJson += "\"pump\":" + String(pump) + ",";
+      clearJson += "\"durationSec\":" + String(durationSec);
+      clearJson += "}";
+
+      firebasePutJson(base + "/calibrate", clearJson);
+    }
+  }
+}
+
 void checkEmergencyStop() {
     // We check a specific "killSwitch" path in your RTDB
     String stopStatus = firebaseGetJson("/devices/" + String(DEVICE_ID) + "/settings/killSwitch");
@@ -2306,7 +2624,11 @@ void checkEmergencyStop() {
             digitalWrite(PIN_PUMP_MG,   LOW);
             digitalWrite(PIN_PUMP_TBD,  LOW);
             
-            firebasePushNotification("CRITICAL", "E-STOP ACTIVE", "All dosing pumps have been hard-disabled.");
+            //notifyAlert("online_state", 30ULL*60ULL*1000ULL, "critical", "E-STOP ACTIVE", "All dosing pumps have been hard-disabled.");
+            sendNtfy("Emergency Stop",
+              String(DEVICE_ID) + "Emergency Stop all pumps are off",
+              3,
+              "Critical");
         }
         globalEmergencyStop = true;
     } else {
@@ -2374,23 +2696,6 @@ void firebaseSendStateHeartbeat() {
 }
 
 
-// Remove the fixed values and use these formulas instead
-void updateChemistryConstants() {
-    if (TANK_VOLUME_L <= 0) return;
-
-    // Saturated Kalk: ~1.4 dKH per Liter. 
-    // Formulas: (Source Strength / Tank Volume)
-    DKH_PER_ML_KALK_TANK    = 1.4f / TANK_VOLUME_L; 
-    CA_PPM_PER_ML_KALK_TANK = 10.0f / TANK_VOLUME_L; // ~10ppm Ca per Liter
-
-    // All-For-Reef: 160 dKH per Liter (approx)
-    DKH_PER_ML_AFR_TANK     = 160.0f / TANK_VOLUME_L;
-    CA_PPM_PER_ML_AFR_TANK  = 1140.0f / TANK_VOLUME_L;
-    MG_PPM_PER_ML_AFR_TANK  = 180.0f / TANK_VOLUME_L;
-
-    Serial.printf("AI Math Updated: 1ml Kalk = %.6f dKH | 1ml AFR = %.6f dKH\n", 
-                  DKH_PER_ML_KALK_TANK, DKH_PER_ML_AFR_TANK);
-}
 
 // ===================== HTTP HANDLERS (local debug/legacy) =====================
 
@@ -2446,30 +2751,14 @@ void handleApiHistory(){
 
 
 
-void updateChemistryMath() {
-    // If volume is 0, default to 300g (1135.6L) to prevent math errors
-    if (TANK_VOLUME_L <= 0) TANK_VOLUME_L = 1135.6f;
-
-    // This creates a ratio: (Original 300g size / New size)
-    // If the tank gets smaller, this number gets larger, making the chemicals more "potent"
-    float scaleFactor = 1135.6f / TANK_VOLUME_L;
-
-    // Update your global chemistry variables based on the new size
-    DKH_PER_ML_KALK_TANK    = 0.0103f * scaleFactor; 
-    CA_PPM_PER_ML_KALK_TANK = 0.0720f * scaleFactor;
-    DKH_PER_ML_AFR_TANK     = 0.0052f * scaleFactor;
-
-    Serial.printf("Tank updated to %.1fL. New Kalk impact: %.6f dKH/ml\n", TANK_VOLUME_L, DKH_PER_ML_KALK_TANK);
-}
-
 
 // ===================== SETUP & LOOP =====================
 
 void setup(){
   Serial.begin(115200);
   delay(1000);
-  Serial.println("=== RUNNING FW " + String(FW_VERSION) + " on " + String(DEVICE_ID) + " ===");
-
+  snprintf(NTFY_TOPIC, sizeof(NTFY_TOPIC), "aidoser-%s-%s", DEVICE_ID, TOPIC_SUFFIX);
+   ntfiUrl = String("https://") + NTFY_HOST + "/" + NTFY_TOPIC;
   pinMode(PIN_PUMP_KALK, OUTPUT);
   pinMode(PIN_PUMP_AFR,  OUTPUT);
   pinMode(PIN_PUMP_MG,   OUTPUT);
@@ -2518,6 +2807,10 @@ validateFlow("TBD",  FLOW_TBD_ML_PER_MIN,   50.0f);
   Serial.print("Connected, IP address: ");
   Serial.println(WiFi.localIP());
 
+    // WiFi event logging + stability tuning
+  WiFi.onEvent(WiFiEvent);
+  wifiTuningInit();
+
   // Allow insecure HTTPS for Firebase
   secureClient.setInsecure();
   initBucketPrefs();
@@ -2527,11 +2820,11 @@ validateFlow("TBD",  FLOW_TBD_ML_PER_MIN,   50.0f);
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
     Serial.println("Failed to obtain time from NTP");
+    // DON'T clear buckets here (keep pending)
   } else {
     Serial.println("Time synchronized from NTP");
-    // Option A: do NOT catch up on missed slots after a reboot
     primeDoseSlotsForToday();
-    clearPendingBuckets("boot prime");
+    // DON'T clear buckets here either
   }
 
   // Web server routes
@@ -2542,16 +2835,20 @@ validateFlow("TBD",  FLOW_TBD_ML_PER_MIN,   50.0f);
   Serial.println("HTTP server started");
 
   // Firebase: send ONE push at boot (Cloud Function will deliver to iPhone)
-  firebasePushNotificationThrottled("boot_push", 30ULL*60ULL*1000ULL,
-    "critical",
+  /*notifyAlert("boot_push", 30ULL*60ULL*1000ULL,
+    "info",
     "ReefDoser Online",
-    String(DEVICE_ID) + " booted. IP " + WiFi.localIP().toString());
+    String(DEVICE_ID) + " booted. IP " + WiFi.localIP().toString());*/
+              sendNtfy("ReefDoser Online",
+              String(DEVICE_ID) + " booted. IP " + WiFi.localIP().toString(),
+              3,
+              "Info");
 
 }
 
 void loop(){
   server.handleClient();
-
+  wifiKeepAliveTick();
   // Push notification only when device goes OFFLINE (WiFi down for >2 minutes).
   // This avoids spam and relies on your Cloud Function to deliver iPhone push.
   static unsigned long wifiDownSinceMs = 0;
@@ -2560,10 +2857,14 @@ void loop(){
     if (wifiDownSinceMs == 0) wifiDownSinceMs = millis();
     if (!offlineNotified && (millis() - wifiDownSinceMs) > 120000UL) {
       // Throttle: at most once per 30 minutes
-      firebasePushNotificationThrottled("offline_push", 30ULL*60ULL*1000ULL,
+      /*notifyAlert("offline_push", 30ULL*60ULL*1000ULL,
         "critical",
         "ReefDoser Offline",
-        String(DEVICE_ID) + " lost WiFi. Last IP " + WiFi.localIP().toString());
+        String(DEVICE_ID) + " lost WiFi. Last IP " + WiFi.localIP().toString());*/
+        sendNtfy("ReefDoser Offline",
+         String(DEVICE_ID) + "AiDoser offline",
+         3,
+         "Critical");
       offlineNotified = true;
     }
   } else {
@@ -2579,58 +2880,63 @@ void loop(){
 
   unsigned long nowMs = millis();
 
-  // Periodically poll Firebase commands (resetAi, liveDose, otaRequest)
-  static unsigned long lastFirebasePollMs = 0;
-if (nowMs - lastFirebasePollMs >= 10000UL) { // every ~10s
-  lastFirebasePollMs = nowMs;
+  // Periodically poll Firebase commands (fast) vs settings (slow)
+  static unsigned long lastCmdPollMs  = 0;
+  static unsigned long lastSlowPollMs = 0;
+  static unsigned long lastTestPollMs = 0;
 
-  firebaseCheckAndHandleResetAi();
-  firebaseCheckAndHandleLiveDose();
-  firebaseCheckAndHandleOtaRequest();
-  firebaseCheckAndHandleCalibrate();
+  // FAST: commands + safety kill switch (keep responsive)
+  if (nowMs - lastCmdPollMs >= 5000UL) { // every ~5s
+    lastCmdPollMs = nowMs;
 
-  firebaseSyncDoseScheduleOnce();
-  firebaseSyncApexOnce();
-  firebaseSyncDosingPlanOnce();
-  firebaseSyncTankSize();
-  checkEmergencyStop();
-  checkForNewTest();
+    firebasePollCommandsFast();
+    checkEmergencyStop(); // keep safety responsive
+  }
 
-  // NOW publish state after you've applied any new settings
-  firebaseSendStateHeartbeat();
+  // MEDIUM: poll for new RTDB tests (keeps AI responsive without hammering DB)
+  if (nowMs - lastTestPollMs >= 30000UL) { // every 30s
+    lastTestPollMs = nowMs;
+    checkForNewTest();
+  }
+
+
+  // SLOW: everything else (reduce TLS load)
+  if (nowMs - lastSlowPollMs >= 600000UL) { // every ~10 minutes
+    lastSlowPollMs = nowMs;
+
+    firebaseSyncDoseScheduleOnce();
+    firebaseSyncApexOnce();
+    firebaseSyncDosingPlanOnce();
+    firebaseSyncTankSize();
+    firebaseSyncFlowCalibrationOnce(); // moved here from 30s -> 10 min
+  }
 
   //////////////////apex schedule//////////////////////////////////////
-  // APEX polling: UI often, AI rarely
-uint64_t now = getEpochMillis();
-if(apexEnabled){
-  // UI publish every 5 minutes
-  if (now - lastApexUiPollMs >= APEX_UI_POLL_MS) {
-    lastApexUiPollMs = now;
-    pollApexAndPublish(false);
-  }
+  // APEX polling: when enabled, poll + publish + AI-apply ONLY every 12 hours
+  uint64_t nowEpoch = getEpochMillis();
+  if (apexEnabled) {
+    // Poll Apex periodically for sensor readings (publish for UI/logs),
+    // but only allow AI dosing adjustments every APEX_AI_MIN_MS.
+    if (nowEpoch - lastApexPollMs >= APEX_POLL_MIN_MS) {
+      lastApexPollMs = nowEpoch;
 
-  // AI apply every 12 hours (or 6 hours if you change APEX_AI_MIN_MS)
-  if (now - lastApexAiApplyMs >= APEX_AI_MIN_MS) {
-    lastApexAiApplyMs = now;
-    pollApexAndPublish(true);
+      const bool allowAiUpdate = (nowEpoch - lastApexAiApplyMs >= APEX_AI_MIN_MS);
+      if (allowAiUpdate) lastApexAiApplyMs = nowEpoch;
+
+      pollApexAndPublish(allowAiUpdate);
+    }
   }
-}
   ////////////////////////////////////////////////////////////////////
 
-  struct tm timeinfo;
-  if (getLocalTime(&timeinfo)) {
-    Serial.println(&timeinfo, "--- CLOCK CHECK: %A, %B %d %Y %I:%M:%S %p ---");
-  } else {
-    Serial.println("--- CLOCK CHECK: Time NOT SET (Still 1970) ---");
-  }
-}
-  
-
-  // Periodically pull calibration values (ml/min) from RTDB (so ESP32 uses what you saved in UI)
-  static unsigned long lastFlowSyncMs = 0;
-  if (nowMs - lastFlowSyncMs >= 30000UL) { // every 30s
-    lastFlowSyncMs = nowMs;
-    firebaseSyncFlowCalibrationOnce();
+  static unsigned long lastClockPrintMs = 0;
+  if (millis() - lastClockPrintMs >= 60000UL) { // print once per minute
+    lastClockPrintMs = millis();
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo)) {
+      Serial.println(&timeinfo, "--- CLOCK CHECK: %A, %B %d %Y %I:%M:%S %p ---");
+    } else {
+      Serial.println("--- CLOCK CHECK: Time NOT SET (Still 1970) ---");
+    }
   }
 
 

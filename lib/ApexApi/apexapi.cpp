@@ -1,27 +1,37 @@
 #include "apexapi.h"
+
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <math.h>
 
-        struct ApexLatest {
-            String date;     // "02/22/2026 00:04:00"
-            float tempF = NAN;
-            float ph    = NAN;
-            float alk   = NAN;
-            float ca    = NAN;
-            float cond  = NAN;   // salt/cond reading from Apex
-            float mg    = NAN;
-        };
-        ApexLatest latest;
+// ------------------------------
+// Shared readings struct (yours)
+// ------------------------------
+struct ApexLatest {
+  String date;     // xml date or json epoch string
+  float tempF = NAN;
+  float ph    = NAN;
+  float alk   = NAN;
+  float ca    = NAN;
+  float cond  = NAN;   // salt/cond reading from Apex
+  float mg    = NAN;
+};
 
+static ApexLatest latest;
+
+// ------------------------------
+// ctor / config
+// ------------------------------
 ApexApi::ApexApi() {}
 
-void ApexApi::setIpAddr(String ip){
-    apexIp = ip;
+void ApexApi::setIpAddr(String ip) {
+  apexIp = ip;
 }
 
-////////////////////////////xml parser ///////////////////////////////
-
+// =====================================================
+// XML PARSER (your existing code, unchanged)
+// =====================================================
 
 bool extractTagValue(const String& src, const String& openTag, const String& closeTag, int from, String& out) {
   int a = src.indexOf(openTag, from);
@@ -67,24 +77,14 @@ bool getProbeValueByName(const String& record, const String& probeName, float& o
   }
 }
 
-static bool parseApexLatest(const String& xml, ApexLatest& out) {
+static bool parseApexLatestXml(const String& xml, ApexLatest& out) {
   String record;
   if (!getLastRecordBlock(xml, record)) return false;
 
-  // record date
   String date;
   if (extractTagValue(record, "<date>", "</date>", 0, date)) out.date = date;
 
-  // --- IMPORTANT ---
-  // Use YOUR Apex probe names here (these come from <name> in the XML)
-  // Based on the sample you uploaded:
-  // Temp: "Tmp" (77.1)
-  // pH: "SumppH" (8.00)  [there are other pH probes too: "pH14ft", "CaRXPH"]
-  // Cond: "Salt" (34.9)
-  // Alk: "Alkx3" (6.83)
-  // Ca:  "Cax3"  (456)
-  // Mg:  "Mgx3"  (1351)
-
+  // Use YOUR probe names
   getProbeValueByName(record, "Tmp",    out.tempF);
   getProbeValueByName(record, "SumppH", out.ph);
   getProbeValueByName(record, "Salt",   out.cond);
@@ -94,121 +94,144 @@ static bool parseApexLatest(const String& xml, ApexLatest& out) {
 
   return true;
 }
-///////////////////////////////////////////////////////////////////////
 
+// =====================================================
+// JSON PARSER for /cgi-bin/status.json
+// =====================================================
+static bool parseApexStatusJson(const String& payload, ApexLatest& out) {
+  if (payload.length() < 10) return false;
+    out = ApexLatest(); 
+  // If you see memory issues, switch to StaticJsonDocument with a fixed size.
+  DynamicJsonDocument doc(64 * 1024); // adjust if needed
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    Serial.printf("APEX JSON parse error: %s\n", err.c_str());
+    return false;
+  }
 
+  JsonVariant istat = doc["istat"];
+  if (istat.isNull()) return false;
 
+  // date is epoch in your sample: "date": 1771868644
+  if (!istat["date"].isNull()) {
+    out.date = String((long)istat["date"]);
+  }
+
+  JsonArray inputs = istat["inputs"].as<JsonArray>();
+  if (inputs.isNull()) return false;
+
+  float tempTank = NAN, tempSump = NAN;
+  float phReef   = NAN, phKalk   = NAN;
+
+  for (JsonObject it : inputs) {
+    const char* typeC = it["type"] | "";
+    const char* nameC = it["name"] | "";
+    float v = it["value"].isNull() ? NAN : (float)it["value"];
+
+    String type(typeC);
+    String name(nameC);
+
+    // Temperature
+    if (type == "Temp" && isfinite(v)) {
+      if (name == "TMP-TK") tempTank = v;
+      else if (name == "TMP-SP") tempSump = v;
+    }
+
+    // pH
+    if (type == "pH" && isfinite(v)) {
+      if (name == "ReefPH") phReef = v;
+      else if (name.indexOf("kalk") >= 0 || name.indexOf("Kalk") >= 0) phKalk = v;
+      else if (!isfinite(phReef)) phReef = v; // fallback
+    }
+
+    // Salt/Conductivity (your sample uses Cond + name Salt)
+    if (type == "Cond" && name == "Salt" && isfinite(v)) {
+      out.cond = v;
+    }
+
+    // Trident values
+    if (type == "alk" && isfinite(v)) out.alk = v;
+    if (type == "ca"  && isfinite(v)) out.ca  = v;
+    if (type == "mg"  && isfinite(v)) out.mg  = v;
+  }
+
+  out.tempF = isfinite(tempTank) ? tempTank : tempSump;
+  out.ph    = isfinite(phReef)   ? phReef   : phKalk;
+
+  // Must have at least temp or pH or something to be "valid"
+  return (isfinite(out.tempF) || isfinite(out.ph) || isfinite(out.cond) ||
+          isfinite(out.alk) || isfinite(out.ca) || isfinite(out.mg));
+}
+
+// =====================================================
+// GET STATE: chooses XML or JSON based on apexJson flag
+// =====================================================
 String ApexApi::getState() {
-    String xml = "";
-    WiFiClientSecure client;
-    client.setInsecure(); // quick test; for production, use root CA
+  String body = "";
 
-    HTTPClient https;
-    // URL to call
-    String url = "http://"+apexIp+"/cgi-bin/status.xml"; // Make sure to use ".xml" instead of ".xlm"
+  // Your Apex URLs are http:// (NOT https://), so use WiFiClient, not WiFiClientSecure
+  WiFiClient client;
+  HTTPClient http;
 
-    if (!https.begin(client, url)) {
-        Serial.println("https.begin() failed");
-        return "";
-    }
+  String url;
+  if (apexJson) url = "http://" + apexIp + "/cgi-bin/status.json";
+  else          url = "http://" + apexIp + "/cgi-bin/status.xml";
 
-    // Send the request
-    int httpCode = https.GET(); // Use GET() to perform the request
+  if (!http.begin(client, url)) {
+    Serial.println("http.begin() failed");
+    return "";
+  }
 
-    // Check for successful response
-    if (httpCode > 0) {
-        // HTTP header has been sent and Server response header has been handled
-        Serial.printf("HTTP GET... code: %d\n", httpCode);
-        
-        // Get the response payload
-        xml = https.getString();
-        Serial.println("Response: " + xml);
-    } else {
-        Serial.printf("HTTP GET failed, error: %s\n", https.errorToString(httpCode).c_str());
-    }
+  int httpCode = http.GET();
+  if (httpCode > 0) {
+    Serial.printf("HTTP GET... code: %d\n", httpCode);
+    body = http.getString();
+    // Serial.println("Response: " + body); // can be huge; enable if debugging
+  } else {
+    Serial.printf("HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
+    http.end();
+    return "";
+  }
 
-    // Close connection
-    https.end();
-    if (parseApexLatest(xml, latest)) {
-  Serial.println("Latest record date: " + latest.date);
-  Serial.printf("TempF=%.2f pH=%.2f Cond=%.2f Alk=%.2f Ca=%.1f Mg=%.0f\n",
-                latest.tempF, latest.ph, latest.cond, latest.alk, latest.ca, latest.mg);
+  http.end();
+
+  bool ok = false;
+  if (apexJson) ok = parseApexStatusJson(body, latest);
+  else          ok = parseApexLatestXml(body, latest);
+
+  if (ok) {
+    Serial.println("Apex date: " + latest.date);
+    Serial.printf("TempF=%.2f pH=%.2f Cond=%.2f Alk=%.2f Ca=%.1f Mg=%.0f\n",
+                  latest.tempF, latest.ph, latest.cond, latest.alk, latest.ca, latest.mg);
+
     setTempF(latest.tempF);
     setPh(latest.ph);
     setCond(latest.cond);
     setAlk(latest.alk);
     setCa(latest.ca);
     setMg(latest.mg);
+    Serial.printf("CLASS: TempF=%.2f pH=%.2f Cond=%.2f Alk=%.2f Ca=%.1f Mg=%.0f\n",
+              getTempF(), getPh(), getCond(), getAlk(), getCa(), getMg());
+  } else {
+    Serial.println(apexJson ? "Failed to parse Apex JSON." : "Failed to parse Apex XML (no record found).");
+  }
 
-  // then write to RTDB however you do it:
-  // devices/<deviceId>/sensors/tempF, pH, cond, alk, ca, mg, etc.
-} else {
-  Serial.println("Failed to parse Apex XML (no record found).");
-}
-    return xml; // Return the XML response
-}
-
-// ===================== WiFi =====================
-void ApexApi::connectWiFi() {
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect(true);
-    delay(100);
-
-    Serial.println("Connecting to WiFi...");
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-
-    unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-        if (millis() - start > 20000) {
-            Serial.println("\nWiFi connect timeout!");
-            return;
-        }
-    }
-
-    Serial.println("\nWiFi connected");
-    Serial.print("IP: ");  Serial.println(WiFi.localIP());
-    Serial.print("GW: ");  Serial.println(WiFi.gatewayIP());
-    Serial.print("DNS: "); Serial.println(WiFi.dnsIP());
-
-    // If you ever hit DNS issues again, uncomment:
-    // WiFi.setDNS(IPAddress(8, 8, 8, 8), IPAddress(1, 1, 1, 1));
+  return body;
 }
 
-float ApexApi::getTempF(){
-    return tempF;
-}
-float ApexApi::getPh(){
-    return ph;
-}
-float ApexApi::getCond(){
-    return cond;
-}
-float ApexApi::getAlk(){
-    return alk;
-}
-float ApexApi::getCa(){
-    return ca;
-}
-float ApexApi::getMg(){
-    return mg;
-}
-void ApexApi::setTempF(float tempF_){
-    tempF_ = tempF;
-}
-void ApexApi::setPh(float ph_){
-    ph_ = ph;
-}
-void ApexApi::setCond(float cond_){
-    cond_ = cond;
-}
-void ApexApi::setAlk(float alk_){
-    alk_ = alk;
-}
-void ApexApi::setCa(float ca_){
-    ca_ = ca;
-}
-void ApexApi::setMg(float mg_){
-    mg_ = mg;
-}
+// =====================================================
+// getters / setters (FIXED)
+// =====================================================
+float ApexApi::getTempF(){ return tempF; }
+float ApexApi::getPh(){ return ph; }
+float ApexApi::getCond(){ return cond; }
+float ApexApi::getAlk(){ return alk; }
+float ApexApi::getCa(){ return ca; }
+float ApexApi::getMg(){ return mg; }
+
+void ApexApi::setTempF(float v){ tempF = v; }
+void ApexApi::setPh(float v){ ph = v; }
+void ApexApi::setCond(float v){ cond = v; }
+void ApexApi::setAlk(float v){ alk = v; }
+void ApexApi::setCa(float v){ ca = v; }
+void ApexApi::setMg(float v){ mg = v; }
