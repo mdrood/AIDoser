@@ -179,6 +179,30 @@
     font-size: 1rem;
   }
 
+  /* NEW: style selects to match inputs */
+  select {
+    width: 100%;
+    padding: 12px;
+    border-radius: 10px;
+    background: #000;
+    border: 1px solid #333;
+    color: #fff;
+    margin-top: 6px;
+    font-size: 1rem;
+  }
+
+  .filter-row {
+    display: flex;
+    gap: 10px;
+    align-items: end;
+    flex-wrap: wrap;
+    margin-top: 10px;
+  }
+  .filter-row > div {
+    min-width: 140px;
+    flex: 0 0 auto;
+  }
+
   button { cursor:pointer; border-radius: 999px; border: none; padding: 12px 24px; font-weight:bold; transition: all 0.2s; }
   .btn-action {
     background: linear-gradient(135deg, var(--accent), #1d4ed8);
@@ -327,9 +351,12 @@
     </div>
   </div>
   <div class="header-right">
-    <span id="tempPill" class="pill pill-sensor">-- °F</span>
-    <span id="phPill" class="pill pill-sensor">pH --</span>
-    <span id="sgPill" class="pill pill-sensor">SG --</span>
+<span id="alkPill" class="pill pill-sensor">Alk --</span>
+<span id="caPill" class="pill pill-sensor">Ca --</span>
+<span id="mgPill" class="pill pill-sensor">Mg --</span>
+<span id="phPill" class="pill pill-sensor">pH --</span>
+<span id="pptPill" class="pill pill-sensor">PPT --</span>
+<span id="sgPill" class="pill pill-sensor">SG --</span>
 
     <button id="openDoseGraphBtn" class="btn-outline-soft btn-compact">📊 History</button>
     <button id="openCalibrationBtn" class="btn-outline-soft btn-compact">🧪 Calibrate</button>
@@ -444,15 +471,27 @@
 
         <div id="otaStatus" style="font-size:0.75rem; margin-top:10px; text-align:center; color: var(--accent); font-weight: 600;"></div>
 
-        <div style="margin-top:12px;">
-          <button class="btn" id="enablePushBtn">Enable iPhone Notifications</button>
-          <div class="muted" id="pushStatus">Push: not enabled</div>
-        </div>
+      <!-- Push notifications removed to allow Spark (free) plan: no Cloud Functions/FCM fanout -->
       </div>
 
       <!-- TEST LOG -->
       <div class="card">
-        <h3 style="color:var(--accent); margin-top:0;">Historical Logs</h3>
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+          <h3 style="color:var(--accent); margin:0;">Historical Logs</h3>
+
+          <div class="filter-row" style="margin:0;">
+            <div>
+              <label style="margin-top:0;">Year</label>
+              <select id="testsYear"></select>
+            </div>
+            <div>
+              <label style="margin-top:0;">Month</label>
+              <select id="testsMonth"></select>
+            </div>
+            <div class="muted" id="testsMeta" style="margin:0; align-self:center;">Loading…</div>
+          </div>
+        </div>
+
         <table class="log-table">
           <thead><tr><th>Date</th><th>Alk</th><th>Ca</th><th>Mg</th><th>pH</th></tr></thead>
           <tbody id="logBody"></tbody>
@@ -472,7 +511,27 @@
         </div>
         <button id="closeCalibrationBtn" class="btn-outline-soft" style="background:var(--danger); color:white; border:none; padding: 10px 20px;">Close</button>
       </div>
-      <div class="grid" id="calGrid"></div>
+      <div class="grid">
+
+  <!-- APEX / TRIDENT SENSOR CONFIG -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <h3 style="color:var(--accent); margin-top:0;">Trident / Neptune (Apex)</h3>
+
+    <label style="display:flex; align-items:center; gap:10px;">
+      <input id="apexEnable" type="checkbox" style="width:auto; transform: translateY(1px);" />
+      <span>Trident/Neptune Sensor</span>
+    </label>
+
+    <label>Apex Controller IP Address</label>
+    <input id="apexIp" type="text" placeholder="e.g. 192.168.1.50">
+
+    <button id="saveApexBtn" class="btn-action" style="margin-top:14px;">Submit</button>
+    <div id="apexStatus" class="muted" style="margin-top:10px;"></div>
+  </div>
+
+  <!-- Pump cards still go here -->
+  <div id="calGrid" class="grid" style="grid-column: 1 / -1;"></div>
+</div>
     </div>
   </div>
 
@@ -493,7 +552,7 @@
       </div>
 
       <div class="card" style="margin-bottom:16px;">
-        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between;">
+        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; justify-content:space-between;">
           <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
             <span class="tag" style="margin:0;"><div class="tag-dot"></div>Filter</span>
             <button class="btn-outline-soft" id="doseTabAll">All</button>
@@ -502,7 +561,18 @@
             <button class="btn-outline-soft" id="doseTabMg">Mg</button>
             <button class="btn-outline-soft" id="doseTabAux">Aux</button>
           </div>
-          <div class="muted" id="doseGraphMeta" style="margin:0;">Loading…</div>
+
+          <div class="filter-row" style="margin:0;">
+            <div>
+              <label style="margin-top:0;">Year</label>
+              <select id="doseYear"></select>
+            </div>
+            <div>
+              <label style="margin-top:0;">Month</label>
+              <select id="doseMonth"></select>
+            </div>
+            <div class="muted" id="doseGraphMeta" style="margin:0; align-self:center;">Loading…</div>
+          </div>
         </div>
       </div>
 
@@ -528,7 +598,7 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js"></script>
+  <!-- NOTE (no-Blaze mode): Firebase Cloud Messaging fanout via Cloud Functions removed. -->
 
   <script>
     const firebaseConfig = {
@@ -554,6 +624,20 @@
     // dose runs listener
     let doseRunsUnsub = null;
     let doseFilter = "all"; // all | kalk | afr | mg | aux
+
+    // NEW: tests listener + month filters
+    let testsUnsub = null;
+    // NEW: params chart listener (unfiltered so Parameter Trends always shows)
+    let paramsUnsub = null;
+
+    // Month filters (default to current month; dropdowns start at Jan 2026)
+    let testsFilterYear = null;
+    let testsFilterMonth = null;
+
+    let doseFilterYear = null;
+    let doseFilterMonth = null;
+
+    const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
     // ---- AUTH UI ----
     document.getElementById('loginButton').onclick = () => {
@@ -594,6 +678,12 @@
         });
       } else {
         activeDeviceId = null;
+
+        // cleanup listeners
+        if (testsUnsub) { try { testsUnsub(); } catch(e){} testsUnsub = null; }
+        if (paramsUnsub) { try { paramsUnsub(); } catch(e){} paramsUnsub = null; }
+        if (doseRunsUnsub) { try { doseRunsUnsub(); } catch(e){} doseRunsUnsub = null; }
+
         document.getElementById('loginModal').classList.remove('hidden');
       }
     });
@@ -713,6 +803,142 @@
       elEvery.addEventListener("change", scheduleSave);
     }
 
+    // NEW: month range helpers + dropdown population
+    function monthRangeMs(year, month1to12) {
+      const start = new Date(year, month1to12 - 1, 1, 0, 0, 0, 0).getTime();
+      const end = new Date(year, month1to12, 1, 0, 0, 0, 0).getTime() - 1;
+      return { start, end };
+    }
+
+    function populateYearMonthSelects(yearEl, monthEl, minYear = 2026) {
+      if (!yearEl || !monthEl) return;
+
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const currentMonth = now.getMonth() + 1;
+
+      yearEl.innerHTML = "";
+      const yStart = Math.min(minYear, currentYear);
+      const yEnd = Math.max(minYear, currentYear);
+
+      for (let y = yStart; y <= yEnd; y++) {
+        const opt = document.createElement("option");
+        opt.value = String(y);
+        opt.textContent = String(y);
+        yearEl.appendChild(opt);
+      }
+
+      monthEl.innerHTML = "";
+      for (let m = 1; m <= 12; m++) {
+        const opt = document.createElement("option");
+        opt.value = String(m);
+        opt.textContent = MONTHS[m - 1];
+        monthEl.appendChild(opt);
+      }
+
+      const defaultYear = Math.max(minYear, currentYear);
+      yearEl.value = String(defaultYear);
+      monthEl.value = String(currentMonth);
+    }
+
+    function initTestLogFilterUI() {
+      const yEl = document.getElementById("testsYear");
+      const mEl = document.getElementById("testsMonth");
+      const metaEl = document.getElementById("testsMeta");
+      if (!yEl || !mEl) return;
+
+      if (yEl.options.length === 0 || mEl.options.length === 0) {
+        populateYearMonthSelects(yEl, mEl, 2026);
+      }
+
+      testsFilterYear = Number(yEl.value);
+      testsFilterMonth = Number(mEl.value);
+
+      const onChange = () => {
+        testsFilterYear = Number(yEl.value);
+        testsFilterMonth = Number(mEl.value);
+        if (metaEl) metaEl.textContent = "Loading…";
+        attachTestsListenerForSelectedMonth();
+      };
+
+      yEl.onchange = onChange;
+      mEl.onchange = onChange;
+    }
+
+    function attachParamsListenerAll() {
+      if (!activeDeviceId) return;
+      if (paramsUnsub) { try { paramsUnsub(); } catch(e){} paramsUnsub = null; }
+
+      // Show recent trend (last ~200 tests) regardless of month filter
+      const ref = db.ref(`devices/${activeDeviceId}/tests`)
+        .orderByChild("timestamp")
+        .limitToLast(200);
+
+      const handler = (s) => {
+        const data = s.val() || {};
+        const rows = Object.values(data)
+          .filter(t => isFinite(Number(t.timestamp)))
+          .sort((a,b) => (a.timestamp || 0) - (b.timestamp || 0));
+        updateParamsChart(rows);
+      };
+
+      ref.on("value", handler);
+      paramsUnsub = () => ref.off("value", handler);
+    }
+
+    function attachTestsListenerForSelectedMonth() {
+      if (!activeDeviceId) return;
+
+      const metaEl = document.getElementById("testsMeta");
+      const y = Number(testsFilterYear);
+      const m = Number(testsFilterMonth);
+      if (!isFinite(y) || !isFinite(m) || m < 1 || m > 12) return;
+
+      if (testsUnsub) { try { testsUnsub(); } catch(e){} testsUnsub = null; }
+
+      const { start, end } = monthRangeMs(y, m);
+
+      const ref = db.ref(`devices/${activeDeviceId}/tests`)
+        .orderByChild("timestamp")
+        .startAt(start)
+        .endAt(end);
+
+      const handler = (s) => {
+        const data = s.val() || {};
+        const rows = Object.values(data)
+          .filter(t => isFinite(Number(t.timestamp)))
+          .sort((a,b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+        if (metaEl) metaEl.textContent = `${MONTHS[m-1]} ${y} • ${rows.length} tests`;
+        updateTestTable(rows);
+      };
+
+      ref.on("value", handler);
+      testsUnsub = () => ref.off("value", handler);
+    }
+
+    function initDoseMonthFilterUI() {
+      const yEl = document.getElementById("doseYear");
+      const mEl = document.getElementById("doseMonth");
+      if (!yEl || !mEl) return;
+
+      if (yEl.options.length === 0 || mEl.options.length === 0) {
+        populateYearMonthSelects(yEl, mEl, 2026);
+      }
+
+      doseFilterYear = Number(yEl.value);
+      doseFilterMonth = Number(mEl.value);
+
+      const onChange = () => {
+        doseFilterYear = Number(yEl.value);
+        doseFilterMonth = Number(mEl.value);
+        attachDoseRunsListener();
+      };
+
+      yEl.onchange = onChange;
+      mEl.onchange = onChange;
+    }
+
     function initApp() {
       initDoseScheduleUI();
 
@@ -791,19 +1017,16 @@
         checkForUpdates();
       });
 
-      // Historical Test Logs
-      db.ref(`devices/${activeDeviceId}/tests`).on('value', s => {
-        const data = s.val() || {};
-        const sorted = Object.values(data).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-        updateParamsChart(sorted);
-        updateTestTable(sorted);
-      });
+      // Parameter Trends: keep showing recent tests (unfiltered)
+      attachParamsListenerAll();
+
+      // Historical Test Logs (month-filtered)
+      initTestLogFilterUI();
+      attachTestsListenerForSelectedMonth();
 
       setupCalibrationUI();
 
-      // Push button wiring (was missing)
-      const pushBtn = document.getElementById("enablePushBtn");
-      if (pushBtn) pushBtn.onclick = enableIphonePush;
+      // Push notifications removed (no-Blaze mode)
     }
 
     function initEmergencyStop() {
@@ -997,11 +1220,79 @@
     if (_openCalibrationBtn) _openCalibrationBtn.onclick = () => {
       document.getElementById('calibrationOverlay').classList.remove('hidden');
       attachCalibrationStatusListener();
+      initApexUi();
     };
     document.getElementById('closeCalibrationBtn').onclick = () => {
       document.getElementById('calibrationOverlay').classList.add('hidden');
       if (calStatusUnsub) { try { calStatusUnsub(); } catch(e){} calStatusUnsub = null; }
+      if (apexUnsub) { try { apexUnsub(); } catch(e){} apexUnsub = null; }
     };
+
+    ////////////////////////Apex/////////////////////////////////////////
+    // ---- APEX / TRIDENT CONFIG (devices/<id>/sensors/Apex) ----
+    let apexUnsub = null;
+
+    function initApexUi() {
+      if (!activeDeviceId) return;
+
+      const enableEl = document.getElementById("apexEnable");
+      const ipEl = document.getElementById("apexIp");
+      const btn = document.getElementById("saveApexBtn");
+      const statusEl = document.getElementById("apexStatus");
+
+      if (!enableEl || !ipEl || !btn || !statusEl) return;
+
+      const ref = db.ref(`devices/${activeDeviceId}/sensors/Apex`);
+
+      // stop any prior listener
+      if (apexUnsub) { try { apexUnsub(); } catch(e){} apexUnsub = null; }
+
+      const handler = (snap) => {
+        const v = snap.val() || {};
+        const en = (v.enable === true || v.enable === 1 || v.enable === "true" || v.enable === "1");
+        enableEl.checked = !!en;
+
+        // only overwrite if user isn't currently typing
+        if (document.activeElement !== ipEl) {
+          ipEl.value = (v.ipAddress || "");
+        }
+
+        statusEl.textContent = "Loaded from Firebase ✅";
+      };
+
+      ref.on("value", handler);
+      apexUnsub = () => ref.off("value", handler);
+
+      btn.onclick = async () => {
+        const enable = !!enableEl.checked;
+        const ip = String(ipEl.value || "").trim();
+
+        // basic validation: allow blank IP if disabled
+        const ipOk = ip === "" || /^(\d{1,3}\.){3}\d{1,3}$/.test(ip);
+        if (enable && !ipOk) {
+          alert("Enter a valid IPv4 address (example: 192.168.1.50).");
+          return;
+        }
+
+        btn.disabled = true;
+        statusEl.textContent = "Saving…";
+
+        try {
+          await ref.set({
+            enable: enable,
+            ipAddress: ip,
+            updatedAt: firebase.database.ServerValue.TIMESTAMP
+          });
+          statusEl.textContent = "Saved ✅";
+        } catch (err) {
+          console.error(err);
+          statusEl.textContent = "Save failed ❌ " + (err?.message || err);
+        } finally {
+          btn.disabled = false;
+        }
+      };
+    }
+    ///////////////////////////////////////////////////////////
 
     // ---- DOSE RUNS / GRAPH ----
     function normalizePump(p) {
@@ -1042,7 +1333,7 @@
         .filter(r => doseFilter === "all" ? true : r.pump === doseFilter)
         .sort((a,b) => (a.ts||0) - (b.ts||0));
 
-      meta.textContent = `${filtered.length} runs shown`;
+      if (meta) meta.textContent = `${filtered.length} runs shown`;
 
       tbody.innerHTML = "";
       [...filtered].reverse().slice(0, 60).forEach(r => {
@@ -1076,33 +1367,45 @@
     function subscribeSensors() {
       if (!activeDeviceId) return;
 
-      const tempPill = document.getElementById("tempPill");
-      const phPill   = document.getElementById("phPill");
-      const sgPill   = document.getElementById("sgPill");
+      const alkPill = document.getElementById("alkPill");
+      const caPill  = document.getElementById("caPill");
+      const mgPill  = document.getElementById("mgPill");
+      const phPill  = document.getElementById("phPill");
+      const pptPill = document.getElementById("pptPill");
+      const sgPill  = document.getElementById("sgPill");
 
-      if (tempPill) tempPill.textContent = "… °F";
-      if (phPill)   phPill.textContent   = "pH …";
-      if (sgPill)   sgPill.textContent   = "SG …";
+      // Reset loading state
+      if (alkPill) alkPill.textContent = "Alk …";
+      if (caPill)  caPill.textContent  = "Ca …";
+      if (mgPill)  mgPill.textContent  = "Mg …";
+      if (phPill)  phPill.textContent  = "pH …";
+      if (pptPill) pptPill.textContent = "PPT …";
+      if (sgPill)  sgPill.textContent  = "SG …";
 
-      const tempRef = db.ref(`devices/${activeDeviceId}/sensors/tempF`);
-      const phRef   = db.ref(`devices/${activeDeviceId}/sensors/pH`);
-      const sgRef   = db.ref(`devices/${activeDeviceId}/sensors/sg`);
+      const baseRef = db.ref(`devices/${activeDeviceId}/sensors`);
 
-      tempRef.off(); phRef.off(); sgRef.off();
+      baseRef.off();
 
-      tempRef.on("value", (snap) => {
-        const n = snap.val();
-        if (tempPill && n !== null) tempPill.textContent = `${parseFloat(n).toFixed(1)} °F`;
-      });
+      baseRef.on("value", (snap) => {
+        const s = snap.val() || {};
 
-      phRef.on("value", (snap) => {
-        const n = snap.val();
-        if (phPill && n !== null) phPill.textContent = `pH ${parseFloat(n).toFixed(2)}`;
-      });
+        if (alkPill && s.alk != null)
+          alkPill.textContent = `Alk ${parseFloat(s.alk).toFixed(2)}`;
 
-      sgRef.on("value", (snap) => {
-        const n = snap.val();
-        if (sgPill && n !== null) sgPill.textContent = `SG ${parseFloat(n).toFixed(4)}`;
+        if (caPill && s.ca != null)
+          caPill.textContent = `Ca ${parseFloat(s.ca).toFixed(0)}`;
+
+        if (mgPill && s.mg != null)
+          mgPill.textContent = `Mg ${parseFloat(s.mg).toFixed(0)}`;
+
+        if (phPill && s.pH != null)
+          phPill.textContent = `pH ${parseFloat(s.pH).toFixed(2)}`;
+
+        if (pptPill && s.salinityPpt != null)
+          pptPill.textContent = `PPT ${parseFloat(s.salinityPpt).toFixed(1)}`;
+
+        if (sgPill && s.sg != null)
+          sgPill.textContent = `SG ${parseFloat(s.sg).toFixed(4)}`;
       });
     }
 
@@ -1139,17 +1442,44 @@
 
       if (doseRunsUnsub) { try { doseRunsUnsub(); } catch(e){} doseRunsUnsub = null; }
 
-      const ref = db.ref(`devices/${activeDeviceId}/doseRuns`).limitToLast(800);
+      const y = Number(doseFilterYear);
+      const m = Number(doseFilterMonth);
+
+      let start = null, end = null;
+      if (isFinite(y) && isFinite(m) && m >= 1 && m <= 12) {
+        const r = monthRangeMs(y, m);
+        start = r.start; end = r.end;
+      } else {
+        const now = new Date();
+        const r = monthRangeMs(now.getFullYear(), now.getMonth() + 1);
+        start = r.start; end = r.end;
+      }
+
+      // Query doseRuns by ts (preferred)
+      const ref = db.ref(`devices/${activeDeviceId}/doseRuns`)
+        .orderByChild("ts")
+        .startAt(start)
+        .endAt(end)
+        .limitToLast(2000);
 
       const handler = (snap) => {
         const obj = snap.val() || {};
-        const rows = Object.values(obj).map(r => ({
-          pump: normalizePump(r.pump || r.pumpName || r.type || ""),
-          ml: computeMlFromRun(r),
-          ts: Number(r.ts || r.timestamp || 0)
-        })).filter(r => r.ts);
+        const rows = Object.values(obj).map(r => {
+          const ts = Number(r.ts || r.timestamp || 0);
+          return {
+            pump: normalizePump(r.pump || r.pumpName || r.type || ""),
+            ml: computeMlFromRun(r),
+            ts
+          };
+        }).filter(r => r.ts && r.ts >= start && r.ts <= end);
 
         renderDoseGraph(rows);
+
+        const meta = document.getElementById("doseGraphMeta");
+        if (meta) {
+          const d = new Date(start);
+          meta.textContent = `${MONTHS[d.getMonth()]} ${d.getFullYear()} • ${rows.filter(r => doseFilter==="all" ? true : r.pump===doseFilter).length} runs shown`;
+        }
       };
 
       ref.on("value", handler);
@@ -1164,6 +1494,7 @@
     const _openDoseGraphBtn = document.getElementById("openDoseGraphBtn");
     if (_openDoseGraphBtn) _openDoseGraphBtn.onclick = () => {
       document.getElementById("doseGraphOverlay").classList.remove("hidden");
+      initDoseMonthFilterUI();
       attachDoseRunsListener();
     };
 
@@ -1178,56 +1509,7 @@
     document.getElementById("doseTabMg").onclick   = () => setDoseFilter("mg");
     document.getElementById("doseTabAux").onclick  = () => setDoseFilter("aux");
 
-    // ---- PUSH ENABLE (iPhone PWA) ----
-    async function enableIphonePush() {
-      const statusEl = document.getElementById("pushStatus");
-      const setStatus = t => statusEl.textContent = t;
-
-      try {
-        if (!activeDeviceId) {
-          alert("No device selected yet.");
-          return;
-        }
-        if (!("serviceWorker" in navigator)) {
-          alert("Service workers not supported.");
-          return;
-        }
-
-        setStatus("Registering service worker...");
-        const reg = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
-
-        setStatus("Requesting notification permission...");
-        const permission = await Notification.requestPermission();
-        if (permission !== "granted") {
-          setStatus("Permission denied");
-          return;
-        }
-
-        const VAPID_KEY = "BAyKJV9NRCycwmCmtNLKtGhOZJbe47uHKbfK_WVsMpszIlxVYOG8ptSwgfZCrpFRAuodt6G3hM5NgW_jMWYk-Yg";
-
-        setStatus("Getting push token...");
-        const messaging = firebase.messaging();
-        const token = await messaging.getToken({ vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
-
-        if (!token) {
-          setStatus("No token received");
-          return;
-        }
-
-        const uid = auth.currentUser.uid;
-        const meta = { ts: Date.now(), platform: "ios-pwa", ua: navigator.userAgent };
-
-        await db.ref(`users/${uid}/pushTokens/${token}`).set(meta);
-        await db.ref(`devices/${activeDeviceId}/pushTokens/${token}`).set(meta);
-
-        setStatus("Push enabled ✅");
-        alert("iPhone notifications enabled!");
-      } catch (err) {
-        console.error(err);
-        document.getElementById("pushStatus").textContent = "Push error";
-        alert("Push failed: " + err.message);
-      }
-    }
+    // Push notifications removed (no-Blaze mode).
   </script>
 </body>
 </html>
