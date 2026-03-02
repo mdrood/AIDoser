@@ -322,3 +322,18 @@ firebase deploy
 ////////////////notifications //////////////////////////
 
 on iphone insall ntfi:
+////////////////////////////////////////////////////////////////////////////////////////
+
+Now vesion 3 dosing Calcium Chloride, Sodium hydroxide.
+
+mix CaCl2 anhydrous = ~116 g per liter of RO/DI
+mix NaOH (Sodium Hydroxide)~84.4 g NaOH per liter
+
+	Code:  float CA_PPM_PER_ML_CACL2_TANK = 0.037f; , float DKH_PER_ML_NAOH_TANK = 0.0052f;
+
+	patch to fix:
+	Existing key / pump label	Now means	Element
+kalk (Pump 1)	Kalkwasser	Alk + a little Ca
+afr (Pump 2)	Calcium Chloride (CaCl2)	Ca only
+mg (Pump 3)	Sodium Hydroxide (NaOH)	Alk only
+tbd (Pump 4)	Magnesium solution	Mg only
