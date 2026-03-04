@@ -337,3 +337,25 @@ kalk (Pump 1)	Kalkwasser	Alk + a little Ca
 afr (Pump 2)	Calcium Chloride (CaCl2)	Ca only
 mg (Pump 3)	Sodium Hydroxide (NaOH)	Alk only
 tbd (Pump 4)	Magnesium solution	Mg only
+
+Important note (so we don’t “invent dosing”)
+
+For Mode 2 and Mode 3, I set the new chemistry constants to 0 by default, so AI will not start changing those solutions until you set real “ppm or dKH per ml” values for your specific mixes.
+
+That means:
+
+AI will still work (and won’t crash), but in Mode 2/3 it will mostly push alk toward kalk unless you set the other constants.
+
+Once you set the constants, AI will fully use NaOH/BRS Alk for alk, NaCl/BRS Ca for calcium, etc.
+
+///////////////////////////automated test//////////////////////////////////////////////
+C:\Users\mdroo\OneDrive\Documents\platformio\AIDoser\webstuff>python test.py
+
+when you run this test you are testing the 6 modes.
+mode 1: Kalk  pump 1 runs.
+mode 2 AFR  pump 1 runs.
+mode 3 Kalk AFR Mb  pump 1-3 runs
+mode 4 Alk Calc Mg  pump 1-3 runs
+mode 5 kalk Alk Calc Mb  pump 1-4 run
+mode 6 Kalk Calcium Chloride, Sodium Hydroxide, Mg pump 1-4 run
+/////////////////////////////////////////////////////////////////////////////////////////

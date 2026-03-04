@@ -462,6 +462,27 @@
           </div>
         </div>
 
+        <div style="margin-top:14px; display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+          <div style="min-width:220px; flex: 0 0 auto;">
+            <label style="margin-top:0;">Dosing Implementation</label>
+      <select id="dosingModeSelect">
+        <option value="1">Mode 1: Kalk</option>
+        <option value="2">Mode 2: AFR (Pump 1)</option>
+        <option value="3">Mode 3: Kalk + AFR + Mg</option>
+        <option value="4">Mode 4: 2-Part (Alk/Ca) + Mg</option>
+        <option value="5">Mode 5: Kalk + 2-Part (Alk/Ca) + Mg</option>
+        <option value="6">Mode 6: Kalk + CaCl2 + NaOH + Mg</option>
+      </select>
+            <div class="muted" style="margin-top:6px;">This controls which pumps/labels the UI and ESP32 use.</div>
+          </div>
+          <div class="tag" style="margin:0; flex: 1 1 auto; min-width:240px;">
+            <div class="tag-dot"></div>
+            <span id="dosingModePill">Mode: —</span>
+          </div>
+        </div>
+
+
+
         <div style="background: rgba(0,0,0,0.3); padding: 20px; border-radius: 12px; display:flex; gap: 15px; align-items:center;">
           <div style="flex:1; font-size:0.8rem; color:var(--text-soft);">
             OTA source:
@@ -616,6 +637,77 @@
     const db = firebase.database();
 
     let activeDeviceId = null;
+    // Dosing implementation (drives labels + which pumps show)
+    // settings/dosingMode is an int: 1..6 (see DOSING_MODES below)
+    let dosingMode = 1;
+    let latestDosingPlan = null;
+    const DOSING_MODES = {
+  1: {
+    pill: "Method 1 • Kalk (Pump 1)",
+    pumps: ["kalk"],
+    labels: { kalk: "Kalk" },
+    calNames: ["Kalk (P1)", "— (P2)", "— (P3)", "— (P4)"]
+  },
+  2: {
+    pill: "Method 2 • AFR (Pump 1)",
+    pumps: ["afr"],
+    labels: { afr: "AFR" },
+    calNames: ["AFR (P1)", "— (P2)", "— (P3)", "— (P4)"]
+  },
+  3: {
+    pill: "Method 3 • Kalk + AFR + Mg (P1–P3)",
+    pumps: ["kalk","afr","mg"],
+    labels: { kalk: "Kalk", afr: "AFR", mg: "Mg" },
+    calNames: ["Kalk (P1)", "AFR (P2)", "Mg (P3)", "— (P4)"]
+  },
+  4: {
+    pill: "Method 4 • Alk + Calcium + Mg (P1–P3)",
+    pumps: ["alk","ca","mg"],
+    labels: { alk: "Alk", ca: "Calcium", mg: "Mg" },
+    calNames: ["Alk (P1)", "Calcium (P2)", "Mg (P3)", "— (P4)"]
+  },
+  5: {
+    pill: "Method 5 • Kalk + 2‑Part (Alk/Ca) + Mg (P1–P4)",
+    pumps: ["kalk","alk","ca","mg"],
+    labels: { kalk: "Kalk", alk: "Alk (2‑Part)", ca: "Calcium (2‑Part)", mg: "Mg" },
+    calNames: ["Kalk (P1)", "Alk (P2)", "Calcium (P3)", "Mg (P4)"]
+  },
+  6: {
+    pill: "Method 6 • Kalk + CaCl2 + NaOH + Mg (P1–P4)",
+    pumps: ["kalk","cacl2","naoh","mg"],
+    labels: { kalk: "Kalk", cacl2: "Calcium Chloride (CaCl2)", naoh: "Sodium Hydroxide (NaOH)", mg: "Mg" },
+    calNames: ["Kalk (P1)", "CaCl2 (P2)", "NaOH (P3)", "Mg (P4)"]
+  }
+};
+
+    function modeCfg() {
+      return DOSING_MODES[dosingMode] || DOSING_MODES[1];
+    }
+
+    function prettyPumpKey(k) {
+      const key = String(k || "").toLowerCase();
+      const cfg = modeCfg();
+      if (cfg.labels && cfg.labels[key]) return cfg.labels[key];
+
+      
+// Back-compat / aliases (in case older firmware wrote different keys)
+if (key === "tbd") return "Aux";
+if (key === "aux") return "Aux";
+
+if (key === "alk") return (dosingMode === 4 ? "Alk" : "Alk (2‑Part)");
+if (key === "ca") return (dosingMode === 4 ? "Calcium" : "Calcium (2‑Part)");
+if (key === "cacl2") return "Calcium Chloride (CaCl2)";
+if (key === "naoh") return "Sodium Hydroxide (NaOH)";
+
+if (key === "brs2alk" || key === "brsalk") return "BRS Alk";
+if (key === "brs2ca"  || key === "brsca")  return "BRS Ca";
+
+if (key === "nacl") return "2-Part A (NaCl)";
+if (key === "afr") return "AFR";
+
+return key.toUpperCase();
+    }
+
 
     // charts
     let paramsChart = null;
@@ -623,7 +715,7 @@
 
     // dose runs listener
     let doseRunsUnsub = null;
-    let doseFilter = "all"; // all | kalk | afr | mg | aux
+    let doseFilter = "all"; // all | kalk | afr | brs2 | mg | tbd
 
     // NEW: tests listener + month filters
     let testsUnsub = null;
@@ -939,8 +1031,123 @@
       mEl.onchange = onChange;
     }
 
-    function initApp() {
+    
+    function configureDoseTabs(){
+      const cfg = modeCfg();
+
+      // Always show All tab
+      const tAll = document.getElementById("doseTabAll");
+      if (tAll) tAll.textContent = "All";
+
+      // Hide all pump tabs by default, then enable per mode config
+      const tabIds = ["doseTabKalk","doseTabAfr","doseTabMg","doseTabAux"];
+      tabIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add("hidden");
+      });
+
+      // Apply mode-specific mapping
+      (cfg.tabs || []).forEach(t => {
+        const el = document.getElementById(t.id);
+        if (!el) return;
+        el.classList.remove("hidden");
+        el.textContent = t.text;
+        el.onclick = () => setDoseFilter(t.key);
+      });
+
+      // If Aux tab shouldn't show, ensure it is hidden
+      const aux = document.getElementById("doseTabAux");
+      if (aux && !cfg.showAuxTab) aux.classList.add("hidden");
+    }
+
+    function initDosingModeUI(){
+      const select = document.getElementById('dosingModeSelect');
+      const pill = document.getElementById('dosingModePill');
+      const status = document.getElementById('dosingModeStatus');
+      if(!db || !activeDeviceId) return;
+
+      const ref = db.ref(`devices/${activeDeviceId}/settings/dosingMode`);
+      const labelRef = db.ref(`devices/${activeDeviceId}/state/dosingModeLabel`);
+
+      // Read current mode from RTDB and keep UI in sync
+      ref.on('value', snap => {
+        const v = Number(snap.val());
+        dosingMode = ([1,2,3,4,5,6].includes(v) ? v : 1);
+
+        if(select) select.value = String(dosingMode);
+        if(pill) pill.textContent = (DOSING_MODES[dosingMode]?.pill || `Method ${dosingMode}`);
+
+        // rebuild calibration cards (pump count/names)
+        setupCalibrationUI();
+        if (latestDosingPlan) renderActivePlan(latestDosingPlan);
+      });
+
+      // Optional label from firmware (nice for debugging)
+      labelRef.on('value', s => {
+        const lbl = s.val();
+        if(status) status.textContent = lbl ? (`Current: ${lbl}`) : '';
+      });
+
+      if(select){
+        select.addEventListener('change', async (e) => {
+          const nm = Number(e.target.value);
+          if(![1,2,3,4,5,6].includes(nm)) return;
+          try {
+            await ref.set(nm);
+          } catch (err) {
+            console.error('Failed to save dosing mode', err);
+            alert('Failed to save dosing mode: ' + (err?.message || err));
+          }
+        });
+      }
+    }
+
+    function renderActivePlan(planObj){
+      const container = document.getElementById('dosingContainer');
+      if(!container) return;
+
+      const plan = planObj || {};
+      const cfg = modeCfg();
+
+      // Only show the pumps that belong to the currently selected method.
+      // (We intentionally DO NOT show "extra" keys from firmware, because that makes the
+      // Active Dosing Plan look like it doesn't match the selected method.)
+      const rows = [];
+      const pumps = (cfg.pumps || []).map(k => String(k || '').toLowerCase());
+
+      for(const key of pumps){
+        const raw = (plan[key] != null) ? plan[key] : null;
+        const num = Number(raw);
+        const amtText = Number.isFinite(num) ? num.toFixed(2) : (raw != null ? String(raw) : '--');
+        rows.push({ label: prettyPumpKey(key), amtText });
+      }
+
+      container.innerHTML = '';
+      if(rows.length === 0){
+        container.innerHTML = `<div class="muted">No dosing plan yet (waiting for ESP32 state).</div>`;
+        return;
+      }
+
+      for(const r of rows){
+        const row = document.createElement('div');
+        row.className = 'plan-row';
+        row.innerHTML = `
+          <div class="plan-left">
+            <div class="plan-dot"></div>
+            <div style="min-width:0;">
+              <div class="plan-name">${r.label}</div>
+              <div class="plan-sub">ml per day</div>
+            </div>
+          </div>
+          <div class="plan-amt">${r.amtText}</div>
+        `;
+        container.appendChild(row);
+      }
+    }
+
+function initApp() {
       initDoseScheduleUI();
+      initDosingModeUI();
 
       // Update badge click handler
       const badge = document.getElementById('updateBadge');
@@ -960,48 +1167,14 @@
         };
       }
 
-      // Active Dosing Plan (fixed display)
+      // Active Dosing Plan (mode-aware display)
       db.ref(`devices/${activeDeviceId}/state/dosingMlPerDay`).on('value', snap => {
         const plan = snap.val() || {};
-        const container = document.getElementById('dosingContainer');
-        if (!container) return;
-
-        const order = ["kalk","afr","mg","tbd","aux"];
-        const keys = Object.keys(plan);
-        keys.sort((a,b) => {
-          const ia = order.indexOf(String(a).toLowerCase());
-          const ib = order.indexOf(String(b).toLowerCase());
-          return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
-        });
-
-        container.innerHTML = "";
-        if (keys.length === 0) {
-          container.innerHTML = `<div class="muted">No dosing plan yet (waiting for ESP32 state).</div>`;
-          return;
-        }
-
-        keys.forEach(k => {
-          const raw = plan[k];
-          const num = Number(raw);
-          const amtText = Number.isFinite(num) ? num.toFixed(2) : String(raw);
-
-          const row = document.createElement("div");
-          row.className = "plan-row";
-          row.innerHTML = `
-            <div class="plan-left">
-              <div class="plan-dot"></div>
-              <div style="min-width:0;">
-                <div class="plan-name">${k}</div>
-                <div class="plan-sub">ml per day</div>
-              </div>
-            </div>
-            <div class="plan-amt">${amtText}</div>
-          `;
-          container.appendChild(row);
-        });
+        latestDosingPlan = plan;
+        renderActivePlan(plan);
       });
 
-      // Device State (Online/Version)
+// Device State (Online/Version)
       db.ref(`devices/${activeDeviceId}/state`).on('value', snap => {
         const state = snap.val() || {};
         const online = state.online === true || state.online === 1;
@@ -1129,18 +1302,26 @@
 
     // ---- CALIBRATION ----
     function setupCalibrationUI() {
-      const names = ["Kalkwasser (P1)", "All-For-Reef (P2)", "Magnesium (P3)", "Auxiliary (P4)"];
+      const cfg = modeCfg();
+      const names = (cfg.calNames || ["Kalkwasser (P1)","All-For-Reef (P2)","Magnesium (P3)"]);
       const grid = document.getElementById('calGrid');
       grid.innerHTML = '';
 
+      // Only render real pumps for the selected mode.
+      // We skip placeholder names like "— (P2)" so you don't get blank/unused cards.
       names.forEach((name, i) => {
-        const n = i + 1;
+        const label = String(name || "").trim();
+        if (!label) return;
+        if (label.startsWith("—") || label.startsWith("-")) return;
+
+        const n = i + 1; // IMPORTANT: keep the real pump number for ESP32 command mapping
+
         const card = document.createElement('div');
         card.className = 'card';
         card.style.textAlign = 'center';
         card.innerHTML = `
           <div style="font-size:0.65rem; color:var(--text-soft); margin-bottom:5px;">PUMP ${n}</div>
-          <div style="font-weight:bold; margin-bottom:15px; color:var(--accent);">${name}</div>
+          <div style="font-weight:bold; margin-bottom:15px; color:var(--accent);">${label}</div>
           <button id="startCal${n}" class="btn-action" style="background:var(--success); margin:0;">Start 60s Test</button>
           <input id="calPump${n}Ml" type="number" placeholder="ml caught in 60s" style="margin: 15px 0; text-align:center;">
           <button id="saveCal${n}" class="btn-outline-soft" style="width:100%; padding: 12px;">Save flow (ml/min)</button>
@@ -1297,10 +1478,30 @@
     // ---- DOSE RUNS / GRAPH ----
     function normalizePump(p) {
       const s = String(p || "").toLowerCase();
+
+      // common
       if (s.includes("kalk")) return "kalk";
+      if (s.includes("alk")) return "alk";
+      if (s.includes("cacl2") || s.includes("calcium chloride")) return "cacl2";
+      // calcium (but avoid matching "calcium chloride" which is handled above)
+      if ((s.includes("calcium") || s.includes("ca")) && !s.includes("chloride")) return "ca";
+
+      // Implementation 1 (AFR)
       if (s.includes("afr") || s.includes("allforreef") || s.includes("all-for-reef")) return "afr";
-      if (s.includes("mg") || s.includes("mag")) return "mg";
-      if (s.includes("aux") || s.includes("pump4") || s.includes("p4")) return "aux";
+
+      // Implementation 2 (4-part)
+      if (s.includes("nacl") || s.includes("sodium chloride") || s.includes("chloride")) return "nacl";
+      if (s.includes("naoh") || s.includes("sodium hydroxide") || s.includes("hydroxide")) return "naoh";
+
+      // Implementation 3 (BRS 2-part)
+      if (s.includes("bsra") || s.includes("brs a") || s.includes("2-part a") || s.includes("2 part a")) return "bsra";
+      if (s.includes("bsrb") || s.includes("brs b") || s.includes("2-part b") || s.includes("2 part b")) return "bsrb";
+
+      // magnesium / aux (back-compat)
+      if (s.includes("mg") || s.includes("magnesium")) return "mg";
+      if (s.includes("brs") || s.includes("2part") || s.includes("2-part")) return "brs2";
+      if (s.includes("tbd") || s.includes("aux") || s.includes("pump4") || s.includes("p4")) return "tbd";
+
       return s || "other";
     }
 
@@ -1504,10 +1705,6 @@
     };
 
     document.getElementById("doseTabAll").onclick  = () => setDoseFilter("all");
-    document.getElementById("doseTabKalk").onclick = () => setDoseFilter("kalk");
-    document.getElementById("doseTabAfr").onclick  = () => setDoseFilter("afr");
-    document.getElementById("doseTabMg").onclick   = () => setDoseFilter("mg");
-    document.getElementById("doseTabAux").onclick  = () => setDoseFilter("aux");
 
     // Push notifications removed (no-Blaze mode).
   </script>
