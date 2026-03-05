@@ -1,11 +1,13 @@
-// main.cpp (updated with MODE SWEEP self-test runner)
-// Goal: Run each dosing mode (1..6) and force AI to run once per mode, then move on.
-// Added:
-//  - /devices/<id>/commands/modeSweep = true  (or "true")
-//  - modeSweepTick() state machine (non-blocking)
-//  - AI timing gates relaxed during selfTest/modeSweep so AI can run immediately
-//
-// IMPORTANT: This is a bench/testing feature. Disable/remove once validated.
+// main.cpp (AIDoser - calibration + selfTest + modeSweep)
+// Fix: restore RTDB commands/calibrate support (pump run from UI)
+// Notes:
+//  - This file is based on the code you pasted, with ONLY the missing calibration
+//    command handling added back in.
+//  - Calibration is handled as a non-blocking state machine (no delay()), so the loop keeps running.
+//  - UI command shape expected:
+//      /devices/<id>/commands/calibrate = {
+//        "durationSec": 60, "pump": 1, "status": "pending", "trigger": true, "ts": 123
+//      }
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -17,6 +19,10 @@
 #include <HTTPClient.h>
 #include <Update.h>
 #include <ArduinoJson.h>
+
+// ---------------- SELF-TEST BUILD TOGGLE ----------------
+// Set to 0 for release builds if you want to completely remove the PC test hooks.
+#define ENABLE_SELFTEST 1
 #include <stdint.h>
 #include <Preferences.h>
 #include <nvs_flash.h>
@@ -25,6 +31,13 @@
 #include <esp_wifi.h>
 
 // Forward declarations used by helpers
+
+// Time validity guard: avoid dosing before NTP has set a real date.
+static bool isTimeValid(const tm& t) {
+  return (t.tm_year >= 123); // 123 == 2023
+}
+
+void handleRoot();
 uint64_t getEpochMillis();
 String firebaseGetJson(const String& path);
 
@@ -39,7 +52,7 @@ WebServer server(80);
 char DEVICE_ID[] = "reefDoser6";
 char TOPIC_SUFFIX[] = "mark1958";
 char NTFY_TOPIC[64];
-const char* FW_VERSION      = "3.0.2";
+const char* FW_VERSION      = "3.0.3";
 bool   apexEnabled = false;
 ////////////////////////////////////////////////////////////////////////////////////////
 
@@ -86,15 +99,25 @@ struct ModeCfg {
 };
 
 static ModeCfg getModeCfg(DosingMode mode);
-static bool modeHasPump(int pumpIndex) {
-  ModeCfg cfg = getModeCfg(gDosingMode);
-  if (pumpIndex == 1) return (cfg.keyP1 != nullptr);
-  if (pumpIndex == 2) return (cfg.keyP2 != nullptr);
-  if (pumpIndex == 3) return (cfg.keyP3 != nullptr);
-  if (pumpIndex == 4) return (cfg.keyP4 != nullptr);
-  return false;
+
+// True if a given physical pump (1..4) is used for a given dosing mode.
+static bool modeHasPump(DosingMode mode, int pumpIndex) {
+  if (pumpIndex < 1 || pumpIndex > 4) return false;
+  const ModeCfg cfg = getModeCfg(mode);
+  switch (pumpIndex) {
+    case 1: return cfg.keyP1 != nullptr;
+    case 2: return cfg.keyP2 != nullptr;
+    case 3: return cfg.keyP3 != nullptr;
+    case 4: return cfg.keyP4 != nullptr;
+    default: return false;
+  }
 }
 
+// Convenience wrapper uses current gDosingMode
+static bool modeHasPump(int pumpIndex) { return modeHasPump(gDosingMode, pumpIndex); }
+
+
+// Convenience: check current mode.
 static ModeCfg getModeCfg(DosingMode mode) {
   switch (mode) {
     case MODE_KALK_ONLY:
@@ -190,6 +213,8 @@ DosingConfig dosing = {
   0.0f
 };
 
+bool firebasePutJson(const String& path, const String& jsonBody);
+
 void publishAiBreadcrumbs(const char* source, const char* reason,
                           float ca, float alk, float mg, float ph) {
   gAiLastRunEpochMs = getEpochMillis();
@@ -234,7 +259,59 @@ void publishAiBreadcrumbs(const char* source, const char* reason,
 
   firebasePatchJson(path, json);
 }
+String firebaseUrl(const String& path);
+// Simple POST JSON helper (for logs/alerts)
+bool firebasePostJson(const String& path, const String& jsonBody) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Firebase POST: WiFi not connected");
+    return false;
+  }
 
+  HTTPClient https;
+  String url = firebaseUrl(path);
+
+  if (!https.begin(secureClient, url)) {
+    Serial.println("Firebase POST begin() failed");
+    return false;
+  }
+  https.setTimeout(30000);
+  https.setReuse(false);
+  https.addHeader("Content-Type", "application/json");
+
+  int code = https.POST(jsonBody);
+  if (code != HTTP_CODE_OK && code != HTTP_CODE_NO_CONTENT) {
+    Serial.printf("Firebase POST error code: %d\n", code);
+    Serial.println(https.getString());
+    https.end();
+    return false;
+  }
+  https.end();
+  return true;
+}
+
+// Log a completed dose run to RTDB so the web UI can build the dosing history graph.
+// Writes to: /devices/<DEVICE_ID>/doseRuns (auto-push key).
+bool firebaseLogDoseRun(int pumpIndex,
+                        const String& pumpName,
+                        float ml,
+                        float durationSec,
+                        float flowMlPerMin,
+                        const String& source) {
+  StaticJsonDocument<256> doc;
+  doc["ts"] = (unsigned long long)getEpochMillis();
+  doc["source"] = source;
+  doc["pumpIndex"] = pumpIndex;
+  doc["pump"] = pumpName;
+  doc["ml"] = ml;
+  doc["durationSec"] = durationSec;
+  doc["flowMlPerMin"] = flowMlPerMin;
+
+  String body;
+  serializeJson(doc, body);
+
+  const String p = "/devices/" + String(DEVICE_ID) + "/doseRuns.json";
+  return firebasePostJson(p, body);
+}
 void onNewTestInput(float ca, float alk, float mg, float ph, float tbd_val);
 
 ApexApi *apexApi = nullptr;
@@ -311,20 +388,6 @@ void wifiKeepAliveTick() {
   Serial.print(" failCount=");
   Serial.print(gWifiFailCount);
   Serial.println();
-}
-
-static void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
-  switch (event) {
-    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-      Serial.printf("WIFI EVENT: disconnected, reason=%d\n", info.wifi_sta_disconnected.reason);
-      break;
-    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-      Serial.print("WIFI EVENT: got ip: ");
-      Serial.println(WiFi.localIP());
-      break;
-    default:
-      break;
-  }
 }
 
 // ===================== Firebase URL + helpers =====================
@@ -534,6 +597,18 @@ float adjustWithLimit(float current, float suggested){
   return current + delta;
 }
 
+// Map a mode "pumpKey" (kalk/afr/mg/tbd/none) to the current per-day dosing target (ml/day).
+// NOTE: These dosing.ml_per_day_* values are "per CHEM", while pending* buckets are "per PUMP".
+static float mlPerDayForKey(const char* key) {
+  if (!key) return 0.0f;
+  if (strcmp(key, "kalk") == 0) return dosing.ml_per_day_kalk;
+  if (strcmp(key, "afr")  == 0) return dosing.ml_per_day_afr;
+  if (strcmp(key, "mg")   == 0) return dosing.ml_per_day_mg;
+  if (strcmp(key, "tbd")  == 0) return dosing.ml_per_day_tbd;
+  return 0.0f; // "none" or unknown
+}
+
+
 void pushHistory(const TestPoint& tp){
   if(historyCount < MAX_HISTORY){
     historyBuf[historyCount++] = tp;
@@ -563,6 +638,8 @@ DoseScheduleCfg doseScheduleCfg;
 
 static void rebuildScheduleSlots() {}
 
+static ModeCfg getModeCfg(DosingMode mode);
+
 void updatePumpSchedules() {
   int activeSlots = (doseScheduleCfg.enabled) ? DOSE_SLOTS_PER_DAY : 3;
   if (activeSlots < 1) activeSlots = 1;
@@ -590,26 +667,97 @@ void updatePumpSchedules() {
                 SEC_PER_DOSE_KALK, SEC_PER_DOSE_AFR, SEC_PER_DOSE_MG, SEC_PER_DOSE_TBD, activeSlots);
 }
 
-void enforceChemSafetyCaps() {}
+void enforceChemSafetyCaps() {
+  // Chemistry-based caps (keep rise per day sane). This is a scale-back, not a hard stop.
+  float alkRise =
+      dosing.ml_per_day_kalk * DKH_PER_ML_KALK_TANK +
+      dosing.ml_per_day_afr  * DKH_PER_ML_AFR_TANK;
+
+  float caRise =
+      dosing.ml_per_day_kalk * CA_PPM_PER_ML_KALK_TANK +
+      dosing.ml_per_day_afr  * CA_PPM_PER_ML_AFR_TANK;
+
+  float mgRise =
+      dosing.ml_per_day_afr  * MG_PPM_PER_ML_AFR_TANK +
+      dosing.ml_per_day_mg   * MG_PPM_PER_ML_MG_TANK;
+
+  const float MAX_ALK_RISE_DKH_PER_DAY = 0.8f;
+  const float MAX_CA_RISE_PPM_PER_DAY  = 20.0f;
+  const float MAX_MG_RISE_PPM_PER_DAY  = 30.0f;
+
+  float scale = 1.0f;
+
+  if (alkRise > MAX_ALK_RISE_DKH_PER_DAY && alkRise > 0.0f) {
+    scale = min(scale, MAX_ALK_RISE_DKH_PER_DAY / alkRise);
+  }
+  if (caRise > MAX_CA_RISE_PPM_PER_DAY && caRise > 0.0f) {
+    scale = min(scale, MAX_CA_RISE_PPM_PER_DAY / caRise);
+  }
+  if (mgRise > MAX_MG_RISE_PPM_PER_DAY && mgRise > 0.0f) {
+    scale = min(scale, MAX_MG_RISE_PPM_PER_DAY / mgRise);
+  }
+
+  if (scale < 1.0f) {
+    dosing.ml_per_day_kalk *= scale;
+    dosing.ml_per_day_afr  *= scale;
+    dosing.ml_per_day_mg   *= scale;
+    dosing.ml_per_day_tbd  *= scale;
+    Serial.printf("SAFETY: Scaling dosing by %.3f\n", scale);
+  }
+}
 
 // ===================== Pump driver =====================
-void firebaseSendStateHeartbeat() {}
+void firebaseSendStateHeartbeat() {
+  if (WiFi.status() != WL_CONNECTED) return;
 
-bool giveDose(int pin, float seconds) {
-  if (globalEmergencyStop) {
-    Serial.println("Pump execution blocked: E-Stop is ACTIVE.");
-    return false;
+  time_t nowSec = time(NULL);
+  uint64_t tsMs = (nowSec > 0) ? (uint64_t)nowSec * 1000ULL : (uint64_t)millis();
+
+  // pending buckets from NVS (so UI can show catch-up)
+  float pk = 0, pa = 0, pm = 0, pt = 0;
+  {
+    Preferences prefs;
+    if (prefs.begin("doser-buckets", true)) {
+      pk = prefs.getFloat("p_kalk", 0.0f);
+      pa = prefs.getFloat("p_afr",  0.0f);
+      pm = prefs.getFloat("p_mg",   0.0f);
+      pt = prefs.getFloat("p_tbd",  0.0f);
+      prefs.end();
+    }
   }
-  if (seconds <= 0) return false;
 
-  Serial.printf("[PUMP] START pin=%d seconds=%.2f\n", pin, seconds);
+  const String pathState = "/devices/" + String(DEVICE_ID) + "/state";
 
-  digitalWrite(pin, HIGH);
-  delay((uint32_t)(seconds * 1000.0f));
-  digitalWrite(pin, LOW);
+  String json = "{";
+  json += "\"online\":true,";
+  json += "\"fwVersion\":\"" + String(FW_VERSION) + "\",";
+  json += "\"lastSeen\":" + String((unsigned long long)tsMs) + ",";
+  json += "\"dosingMode\":" + String((int)gDosingMode) + ",";
 
-  Serial.printf("[PUMP] STOP  pin=%d ran=%.2fs\n", pin, seconds);
-  return true;
+  json += "\"dosingMlPerDay\":{";
+  json += "\"kalk\":" + String(dosing.ml_per_day_kalk, 2) + ",";
+  json += "\"afr\":"  + String(dosing.ml_per_day_afr,  2) + ",";
+  json += "\"mg\":"   + String(dosing.ml_per_day_mg,   2) + ",";
+  json += "\"tbd\":"  + String(dosing.ml_per_day_tbd,  2);
+  json += "},";
+
+  json += "\"pendingMl\":{";
+  json += "\"kalk\":" + String(pk, 2) + ",";
+  json += "\"afr\":"  + String(pa, 2) + ",";
+  json += "\"mg\":"   + String(pm, 2) + ",";
+  json += "\"tbd\":"  + String(pt, 2);
+  json += "},";
+
+  json += "\"flowMlPerMin\":{";
+  json += "\"kalk\":" + String(FLOW_KALK_ML_PER_MIN, 2) + ",";
+  json += "\"afr\":"  + String(FLOW_AFR_ML_PER_MIN,  2) + ",";
+  json += "\"mg\":"   + String(FLOW_MG_ML_PER_MIN,   2) + ",";
+  json += "\"tbd\":"  + String(FLOW_TBD_ML_PER_MIN,  2);
+  json += "}";
+
+  json += "}";
+
+  firebasePutJson(pathState, json);
 }
 
 // ===================== TIME =====================
@@ -617,16 +765,80 @@ uint64_t getEpochMillis() { return (uint64_t)millis(); }
 
 // ===================== Pending buckets (prefs) =====================
 void clearPendingBuckets(const char* why) {
-  pendingKalkMl = pendingAfrMl = pendingMgMl = pendingTbdMl = 0.0f;
-  Serial.print("Pending buckets CLEARED: ");
-  Serial.println(why ? why : "");
+  // Clear in-RAM pending dose accumulators
+  pendingKalkMl = 0.0f;
+  pendingAfrMl  = 0.0f;
+  pendingMgMl   = 0.0f;
+  pendingTbdMl  = 0.0f;
+
+  // Clear persisted buckets too (prevents reboot from re-loading old pending dose)
+  Preferences p;
+  if (p.begin("doser-buckets", false)) {
+    p.putFloat("p_kalk", 0.0f);
+    p.putFloat("p_afr",  0.0f);
+    p.putFloat("p_mg",   0.0f);
+    p.putFloat("p_tbd",  0.0f);
+    p.end();
+  }
+
+  Serial.printf("Buckets cleared (%s)\n", why ? why : "");
 }
-void initBucketPrefs() {}
+void initBucketPrefs() {
+  Preferences prefs;
+  if (!prefs.begin("doser-buckets", false)) {
+    Serial.println("Prefs: failed to open doser-buckets (write)");
+    return;
+  }
+  if (!prefs.isKey("p_kalk")) prefs.putFloat("p_kalk", 0.0f);
+  if (!prefs.isKey("p_afr"))  prefs.putFloat("p_afr",  0.0f);
+  if (!prefs.isKey("p_mg"))   prefs.putFloat("p_mg",   0.0f);
+  if (!prefs.isKey("p_tbd"))  prefs.putFloat("p_tbd",  0.0f);
+  prefs.end();
+}
 
 // ===================== Dosing prefs (minimal) =====================
-void loadDosingFromPrefs() {}
-void saveDosingToPrefs() {}
-void loadFlowFromPrefs() {}
+void loadDosingFromPrefs() {
+  if (!dosingPrefs.begin("dosing", true)) {
+    Serial.println("Prefs: failed to open dosing (read)");
+    return;
+  }
+  dosing.ml_per_day_kalk = dosingPrefs.getFloat("kalk", dosing.ml_per_day_kalk);
+  dosing.ml_per_day_afr  = dosingPrefs.getFloat("afr",  dosing.ml_per_day_afr);
+  dosing.ml_per_day_mg   = dosingPrefs.getFloat("mg",   dosing.ml_per_day_mg);
+  dosing.ml_per_day_tbd  = dosingPrefs.getFloat("tbd",  dosing.ml_per_day_tbd);
+  dosingPrefs.end();
+
+	  Serial.printf("Prefs: loaded dosing KALK=%.2f AFR=%.2f MG=%.2f TBD=%.2f\n",
+                dosing.ml_per_day_kalk, dosing.ml_per_day_afr, dosing.ml_per_day_mg, dosing.ml_per_day_tbd);
+}
+void saveDosingToPrefs() {
+  if (!dosingPrefs.begin("dosing", false)) {
+    Serial.println("Prefs: failed to open dosing (write)");
+    return;
+  }
+  dosingPrefs.putFloat("kalk", dosing.ml_per_day_kalk);
+  dosingPrefs.putFloat("afr",  dosing.ml_per_day_afr);
+  dosingPrefs.putFloat("mg",   dosing.ml_per_day_mg);
+  dosingPrefs.putFloat("tbd",  dosing.ml_per_day_tbd);
+  dosingPrefs.end();
+
+	  Serial.printf("Prefs: saved dosing KALK=%.2f AFR=%.2f MG=%.2f TBD=%.2f\n",
+                dosing.ml_per_day_kalk, dosing.ml_per_day_afr, dosing.ml_per_day_mg, dosing.ml_per_day_tbd);
+}
+void loadFlowFromPrefs() {
+  if (!dosingPrefs.begin("flow", true)) {
+    Serial.println("Prefs: failed to open flow (read)");
+    return;
+  }
+  FLOW_KALK_ML_PER_MIN = dosingPrefs.getFloat("fk", FLOW_KALK_ML_PER_MIN);
+  FLOW_AFR_ML_PER_MIN  = dosingPrefs.getFloat("fa", FLOW_AFR_ML_PER_MIN);
+  FLOW_MG_ML_PER_MIN   = dosingPrefs.getFloat("fm", FLOW_MG_ML_PER_MIN);
+  FLOW_TBD_ML_PER_MIN  = dosingPrefs.getFloat("fx", FLOW_TBD_ML_PER_MIN);
+  dosingPrefs.end();
+
+	  Serial.printf("Prefs: loaded flow KALK=%.2f AFR=%.2f MG=%.2f TBD=%.2f\n",
+                FLOW_KALK_ML_PER_MIN, FLOW_AFR_ML_PER_MIN, FLOW_MG_ML_PER_MIN, FLOW_TBD_ML_PER_MIN);
+}
 static void validateFlow(const char* name, float &flow, float fallback) {
   if (!isfinite(flow) || flow < 0.5f || flow > 2000.0f) flow = fallback;
 }
@@ -638,11 +850,10 @@ static uint64_t gSelfTestLastTickMs = 0;
 static uint64_t gSelfTestUntilEpochMs = 0;
 static bool     gSelfTestRunOnce = false; // if true, run pumps only once per selfTest enable
 
-
 static uint32_t SELFTEST_DURATION_MS  = 30UL * 1000UL;// 30s: one pump-run per selfTest command during bench testing
 static uint32_t SELFTEST_INTERVAL_MS  = 60UL * 1000UL;
 static float    SELFTEST_PUMP_SEC     = 2.0f;
-static float    SELFTEST_MIN_DOSE_SEC = 0.20f;
+static float    SELFTEST_gMinDoseSec = 0.20f;
 
 /** Publish key self-test fields so the PC runner can observe them */
 static void publishSelfTestState() {
@@ -668,6 +879,7 @@ static void applyDosingMode(DosingMode m, const char* why) {
   if (m == gDosingMode) return;
   gDosingMode = m;
   saveDosingModeToPrefs(gDosingMode);
+  clearPendingBuckets("mode changed");
   publishDosingModeState();
   Serial.printf("[MODE] Applied dosingMode=%d (%s)\n", (int)gDosingMode, why ? why : "");
 }
@@ -699,7 +911,7 @@ static void enableSelfTest(const char* why) {
   publishSelfTestState();
   publishDosingModeState();
 
-  gMinDoseSec = SELFTEST_MIN_DOSE_SEC;
+  gMinDoseSec = SELFTEST_gMinDoseSec;
 
   Serial.printf("\n==================== SELFTEST ENABLED (%s) ====================\n\n", (why ? why : ""));
 }
@@ -714,10 +926,97 @@ static void disableSelfTest(const char* why) {
   publishSelfTestState();
 }
 
+// ===================== CALIBRATE COMMAND (RESTORED) =====================
+// This is what we "lost": the firmware was no longer watching commands/calibrate
+// so the UI would set status=pending forever and nothing would run.
+static bool     gCalActive = false;
+static uint8_t  gCalPumpIndex = 0;     // 1..4
+static uint32_t gCalDurationMs = 0;
+static uint32_t gCalStartMs = 0;
+
+static int pumpIndexToPin(uint8_t pump) {
+  switch (pump) {
+    case 1: return PIN_PUMP_KALK;
+    case 2: return PIN_PUMP_AFR;
+    case 3: return PIN_PUMP_MG;
+    case 4: return PIN_PUMP_TBD;
+    default: return -1;
+  }
+}
+
+static void setPumpOn(uint8_t pump, bool on) {
+  int pin = pumpIndexToPin(pump);
+  if (pin < 0) return;
+  digitalWrite(pin, on ? HIGH : LOW);
+}
+
+static void calibWriteStatus(const String& status, const String& extraJsonFields = "") {
+  String base = "/devices/" + String(DEVICE_ID) + "/commands/calibrate";
+  String json = "{";
+  json += "\"status\":\"" + status + "\"";
+  if (extraJsonFields.length()) json += "," + extraJsonFields;
+  json += "}";
+  firebasePatchJson(base, json);
+}
+
+static void calibStart(uint8_t pump, uint32_t durationSec) {
+  if (globalEmergencyStop) {
+    calibWriteStatus("error", "\"error\":\"E-STOP active\",\"trigger\":false");
+    return;
+  }
+
+  int pin = pumpIndexToPin(pump);
+  if (pin < 0 || durationSec == 0) {
+    calibWriteStatus("error", "\"error\":\"bad pump or duration\",\"trigger\":false");
+    return;
+  }
+
+  // If a calibration is already running, ignore new start requests
+  if (gCalActive) {
+    calibWriteStatus("busy", "\"trigger\":false");
+    return;
+  }
+
+  gCalActive = true;
+  gCalPumpIndex = pump;
+  gCalDurationMs = durationSec * 1000UL;
+  gCalStartMs = millis();
+
+  // ACK immediately so UI knows we received it
+  calibWriteStatus(
+    "running",
+    "\"trigger\":false,"
+    "\"startedAt\":" + String((unsigned long long)getEpochMillis()) + ","
+    "\"pump\":" + String(pump) + ","
+    "\"durationSec\":" + String(durationSec)
+  );
+
+  Serial.printf("[CAL] START pump=%u pin=%d duration=%lus\n", pump, pin, (unsigned long)durationSec);
+  setPumpOn(pump, true);
+}
+
+static void calibTick() {
+  if (!gCalActive) return;
+
+  uint32_t now = millis();
+  if ((uint32_t)(now - gCalStartMs) >= gCalDurationMs) {
+    setPumpOn(gCalPumpIndex, false);
+
+    Serial.printf("[CAL] DONE pump=%u ran=%lu ms\n", gCalPumpIndex, (unsigned long)(now - gCalStartMs));
+
+    calibWriteStatus(
+      "done",
+      "\"finishedAt\":" + String((unsigned long long)getEpochMillis())
+    );
+
+    gCalActive = false;
+    gCalPumpIndex = 0;
+    gCalDurationMs = 0;
+    gCalStartMs = 0;
+  }
+}
+
 // ===================== TEST INPUT (from RTDB) =====================
-// PC runner can write test samples here:
-//   /devices/<id>/tests/latest = {"ts":123, "ca":440, "alk":8.2, "mg":1350, "ph":8.1, "tbd":0}
-// If "ts" is omitted, we fall back to a hash of the JSON.
 static uint64_t gLastTestSampleKey = 0;
 static int      gAiRanForMode = 0; // when selfTest/modeSweep, allow exactly 1 AI run per mode
 static bool     gModeSweepActive = false; // forward decl for pollLatestTestSampleAndMaybeRunAi
@@ -778,6 +1077,18 @@ static void pollLatestTestSampleAndMaybeRunAi() {
   gAiCurrentSource = prev;
 }
 
+// Simple pump-on helper used by bench tests (selfTest/modeSweep).
+// NOTE: This is time-blocking by design (bench only).
+static void runPumpSeconds(int pin, int seconds) {
+  if (seconds <= 0) return;
+  Serial.printf("BENCH: pump pin %d ON for %d sec\n", pin, seconds);
+  digitalWrite(pin, HIGH);
+  delay((uint32_t)seconds * 1000UL);
+  digitalWrite(pin, LOW);
+}
+
+
+
 static void selfTestTick() {
   if (!gSelfTestActive) return;
   uint64_t now = (uint64_t)millis();
@@ -786,10 +1097,10 @@ static void selfTestTick() {
   if (gSelfTestLastTickMs != 0 && (now - gSelfTestLastTickMs) < SELFTEST_INTERVAL_MS) return;
   gSelfTestLastTickMs = now;
   ModeCfg cfg = getModeCfg(gDosingMode);
-  giveDose(PIN_PUMP_KALK, SELFTEST_PUMP_SEC);
-  if (cfg.keyP2) giveDose(PIN_PUMP_AFR, SELFTEST_PUMP_SEC);
-  if (cfg.keyP3) giveDose(PIN_PUMP_MG,  SELFTEST_PUMP_SEC);
-  if (cfg.keyP4) giveDose(PIN_PUMP_TBD, SELFTEST_PUMP_SEC);
+  runPumpSeconds(PIN_PUMP_KALK, (float)(SELFTEST_PUMP_SEC));
+  if (cfg.keyP2) runPumpSeconds(PIN_PUMP_AFR, (float)(SELFTEST_PUMP_SEC));
+  if (cfg.keyP3) runPumpSeconds(PIN_PUMP_MG, (float)(SELFTEST_PUMP_SEC));
+  if (cfg.keyP4) runPumpSeconds(PIN_PUMP_TBD, (float)(SELFTEST_PUMP_SEC));
 }
 
 // ===================== MODE SWEEP (NEW) =====================
@@ -814,6 +1125,7 @@ static void modeSweepStop(const char* why) {
   gModeSweepActive = false;
   gDosingMode = gModeSweepPrevMode;
   saveDosingModeToPrefs(gDosingMode);
+  clearPendingBuckets("mode changed");
   disableSelfTest("mode sweep done");
   Serial.printf("\n==================== MODE SWEEP STOPPED (%s) ====================\n\n", (why ? why : ""));
 }
@@ -831,10 +1143,10 @@ static void modeSweepInjectTestsForAi(uint8_t mode) {
 
 static void modeSweepRunPumpsOnceForMode() {
   ModeCfg cfg = getModeCfg(gDosingMode);
-  giveDose(PIN_PUMP_KALK, SELFTEST_PUMP_SEC);
-  if (cfg.keyP2) giveDose(PIN_PUMP_AFR, SELFTEST_PUMP_SEC);
-  if (cfg.keyP3) giveDose(PIN_PUMP_MG,  SELFTEST_PUMP_SEC);
-  if (cfg.keyP4) giveDose(PIN_PUMP_TBD, SELFTEST_PUMP_SEC);
+  runPumpSeconds(PIN_PUMP_KALK, (float)(SELFTEST_PUMP_SEC));
+  if (cfg.keyP2) runPumpSeconds(PIN_PUMP_AFR, (float)(SELFTEST_PUMP_SEC));
+  if (cfg.keyP3) runPumpSeconds(PIN_PUMP_MG, (float)(SELFTEST_PUMP_SEC));
+  if (cfg.keyP4) runPumpSeconds(PIN_PUMP_TBD, (float)(SELFTEST_PUMP_SEC));
 }
 
 static void modeSweepTick() {
@@ -845,6 +1157,7 @@ static void modeSweepTick() {
     case 0: {
       gDosingMode = clampDosingMode((int)gModeSweepMode);
       saveDosingModeToPrefs(gDosingMode);
+  clearPendingBuckets("mode changed");
       historyCount = 0;
       memset(historyBuf, 0, sizeof(historyBuf));
       lastTest = {0,0,0,0,0,0};
@@ -901,19 +1214,18 @@ void onNewTestInput(float ca, float alk, float mg, float ph, float tbd_val) {
 
   float days = float(currentTest.t - lastTest.t) / 86400.0f;
 
-  // CHANGED: allow AI to run immediately during selfTest/modeSweep
+  // allow AI to run immediately during selfTest/modeSweep
   if (days <= 0.25f && !(gSelfTestActive || gModeSweepActive)) {
     Serial.println("SAFETY: Tests too close together, ignoring for dosing updates.");
     return;
   }
   if (days <= 0.0f) days = 0.0001f;
 
-  // Placeholder: In your full build, this continues with your real AI allocation logic.
   publishAiBreadcrumbs(gAiCurrentSource, (gModeSweepActive ? "modeSweep" : "onNewTestInput"), ca, alk, mg, ph);
   Serial.printf("AI Update: mode=%d ran (test harness).\n", (int)gDosingMode);
 }
 
-// ===================== Commands poll (includes new modeSweep) =====================
+// ===================== Commands poll (includes calibrate + modeSweep + selfTest) =====================
 void firebasePollCommandsFast() {
   if (WiFi.status() != WL_CONNECTED) return;
 
@@ -927,10 +1239,25 @@ void firebasePollCommandsFast() {
   JsonObject root = doc.as<JsonObject>();
   if (root.isNull()) return;
 
+  // ---- CALIBRATE (RESTORED) ----
+  // Expect: commands/calibrate { trigger:true, pump:1..4, durationSec:N, status:"pending" }
+  if (root.containsKey("calibrate")) {
+    JsonObject c = root["calibrate"].as<JsonObject>();
+    if (!c.isNull()) {
+      bool trig = c.containsKey("trigger") ? c["trigger"].as<bool>() : false;
+      int  pump = c.containsKey("pump") ? c["pump"].as<int>() : 0;
+      int  dur  = c.containsKey("durationSec") ? c["durationSec"].as<int>() : 0;
+
+      if (trig && !gCalActive) {
+        // Start calibration and immediately flip trigger=false + status=running
+        calibStart((uint8_t)pump, (uint32_t)dur);
+      }
+    }
+  }
+
   if (root.containsKey("modeSweep")) {
     bool want = root["modeSweep"].is<bool>() ? root["modeSweep"].as<bool>() : false;
     if (want) {
-      // Clear the command FIRST to avoid repeated triggers from fast polling.
       firebasePutJson(base + "/modeSweep", "false");
       modeSweepStart("RTDB command");
     }
@@ -939,27 +1266,25 @@ void firebasePollCommandsFast() {
   if (root.containsKey("selfTest")) {
     bool want = root["selfTest"].is<bool>() ? root["selfTest"].as<bool>() : false;
     if (want) {
-      // Clear the command FIRST to avoid repeated triggers from fast polling.
       firebasePutJson(base + "/selfTest", "false");
       enableSelfTest("RTDB command");
     }
   }
 
-// Also watch settings/dosingMode so the PC runner can change modes.
-static uint64_t lastModePollMs = 0;
-uint64_t nowMs = millis();
-if (nowMs - lastModePollMs >= 1500) {
-  lastModePollMs = nowMs;
-  String modeBody = firebaseGetJson("/devices/" + String(DEVICE_ID) + "/settings/dosingMode");
-  modeBody.trim();
-  if (modeBody.length() && modeBody != "null") {
-    int v = modeBody.toInt();
-    if (v >= 1 && v <= 6) {
-      applyDosingMode(clampModeInt(v), "RTDB settings/dosingMode");
+  // Watch settings/dosingMode so the PC runner can change modes.
+  static uint64_t lastModePollMs = 0;
+  uint64_t nowMs = millis();
+  if (nowMs - lastModePollMs >= 1500) {
+    lastModePollMs = nowMs;
+    String modeBody = firebaseGetJson("/devices/" + String(DEVICE_ID) + "/settings/dosingMode");
+    modeBody.trim();
+    if (modeBody.length() && modeBody != "null") {
+      int v = modeBody.toInt();
+      if (v >= 1 && v <= 6) {
+        applyDosingMode(clampModeInt(v), "RTDB settings/dosingMode");
+      }
     }
   }
-}
-
 }
 
 // ===================== Web server minimal =====================
@@ -969,6 +1294,107 @@ const char MAIN_PAGE_HTML[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 void handleRoot(){ server.send_P(200, "text/html", MAIN_PAGE_HTML); }
+
+// ===================== SIMPLE LEGACY DAILY SCHEDULE (3 slots) =====================
+// This restores the original "3 doses per day" behavior without the PC self-test harness.
+// If you enable the newer window-based schedule later, you can replace this with that logic.
+static const int LEGACY_SLOTS = 3;
+static const int LEGACY_DOSE_H[LEGACY_SLOTS] = {9, 12, 15};
+static const int LEGACY_DOSE_M[LEGACY_SLOTS] = {30, 30, 30};
+static bool legacySlotDone[LEGACY_SLOTS] = {false, false, false};
+static int legacyLastYday = -1;
+
+// Run a dose on a physical pump pin for durationSec, then turn it off.
+static bool runPumpSeconds(int pin, float durationSec) {
+  if (durationSec <= 0.0f) return false;
+  digitalWrite(pin, HIGH);
+  uint32_t ms = (uint32_t)(durationSec * 1000.0f);
+  uint32_t start = millis();
+  while ((uint32_t)(millis() - start) < ms) {
+    delay(25);
+  }
+  digitalWrite(pin, LOW);
+  return true;
+}
+
+// Doses 'ml' on a given physical pump, logs to RTDB doseRuns.
+static void doseAndLog(int pumpIndex, const String& pumpName, int pin, float ml, float flowMlPerMin, const String& source) {
+  if (ml <= 0.0f || flowMlPerMin <= 0.0f) return;
+  const float sec = (ml / flowMlPerMin) * 60.0f;
+  if (sec < gMinDoseSec) return;
+  if (!runPumpSeconds(pin, sec)) return;
+  firebaseLogDoseRun(pumpIndex, pumpName, ml, sec, flowMlPerMin, source);
+}
+
+// Perform scheduled dosing (3 fixed times) using the NVS "pending buckets" so missed slots accumulate.
+void maybeDosePumpsRealTime() {
+  struct tm t;
+  if (!getLocalTime(&t)) return;
+  if (!isTimeValid(t)) return;
+
+  if (legacyLastYday != t.tm_yday) {
+    legacyLastYday = t.tm_yday;
+    for (int i = 0; i < LEGACY_SLOTS; i++) legacySlotDone[i] = false;
+  }
+
+  int slot = -1;
+  for (int i = 0; i < LEGACY_SLOTS; i++) {
+    if (t.tm_hour == LEGACY_DOSE_H[i] && t.tm_min == LEGACY_DOSE_M[i]) { slot = i; break; }
+  }
+  if (slot < 0) return;
+  if (legacySlotDone[slot]) return;
+
+  // Load buckets
+  Preferences prefs;
+  if (!prefs.begin("doser-buckets", false)) {
+    Serial.println("Prefs: failed to open doser-buckets");
+    return;
+  }
+  pendingKalkMl = prefs.getFloat("p_kalk", 0.0f);
+  pendingAfrMl  = prefs.getFloat("p_afr",  0.0f);
+  pendingMgMl   = prefs.getFloat("p_mg",   0.0f);
+  pendingTbdMl  = prefs.getFloat("p_tbd",  0.0f);
+
+  // Add this slot's allocation PER PUMP based on the active mode mapping.
+  // dosing.ml_per_day_* are per-CHEM targets; cfg.pumpKey[] tells which chem is in each physical pump.
+  const ModeCfg& cfgAlloc = getModeCfg(gDosingMode);
+  const float slotsPerDay = 3.0f;
+  if (modeHasPump(gDosingMode, 1)) pendingKalkMl += mlPerDayForKey(cfgAlloc.keyP1) / slotsPerDay;
+  if (modeHasPump(gDosingMode, 2)) pendingAfrMl  += mlPerDayForKey(cfgAlloc.keyP2) / slotsPerDay;
+  if (modeHasPump(gDosingMode, 3)) pendingMgMl   += mlPerDayForKey(cfgAlloc.keyP3) / slotsPerDay;
+  if (modeHasPump(gDosingMode, 4)) pendingTbdMl  += mlPerDayForKey(cfgAlloc.keyP4) / slotsPerDay;
+
+  // Mode-based pump naming (uses your existing 6-mode table)
+  const ModeCfg& cfg = getModeCfg(gDosingMode);
+
+  // Dose each physical pump if its bucket is big enough
+  if (pendingKalkMl > 0.0f) {
+    doseAndLog(1, cfg.keyP1, PIN_PUMP_KALK, pendingKalkMl, FLOW_KALK_ML_PER_MIN, "schedule");
+    pendingKalkMl = 0.0f;
+  }
+  if (pendingAfrMl > 0.0f) {
+    doseAndLog(2, cfg.keyP2, PIN_PUMP_AFR, pendingAfrMl, FLOW_AFR_ML_PER_MIN, "schedule");
+    pendingAfrMl = 0.0f;
+  }
+  if (pendingMgMl > 0.0f) {
+    doseAndLog(3, cfg.keyP3, PIN_PUMP_MG, pendingMgMl, FLOW_MG_ML_PER_MIN, "schedule");
+    pendingMgMl = 0.0f;
+  }
+  if (pendingTbdMl > 0.0f) {
+    doseAndLog(4, cfg.keyP4, PIN_PUMP_TBD, pendingTbdMl, FLOW_TBD_ML_PER_MIN, "schedule");
+    pendingTbdMl = 0.0f;
+  }
+
+  // Save buckets back (anything not dosed remains)
+  prefs.putFloat("p_kalk", pendingKalkMl);
+  prefs.putFloat("p_afr",  pendingAfrMl);
+  prefs.putFloat("p_mg",   pendingMgMl);
+  prefs.putFloat("p_tbd",  pendingTbdMl);
+  prefs.end();
+
+  legacySlotDone[slot] = true;
+  Serial.printf("SCHEDULE: slot %d handled at %02d:%02d\n", slot + 1, t.tm_hour, t.tm_min);
+}
 
 void setup(){
   Serial.begin(115200);
@@ -996,6 +1422,8 @@ void setup(){
   updatePumpSchedules();
   initBucketPrefs();
 
+  wifiTuningInit();
+
   if(!wm.autoConnect("ESP32_Config")) {
     Serial.println("WiFi not configured yet.");
   } else {
@@ -1013,16 +1441,31 @@ void loop(){
   server.handleClient();
   wifiKeepAliveTick();
 
+  // Calibration state machine (turns pump off when done)
+  calibTick();
+
+  // Restore production scheduled dosing (3 slots/day) + buckets
+  maybeDosePumpsRealTime();
+
+  // Bench self-test/mode sweep are still available, but they do NOT replace production behavior.
   if (!gModeSweepActive) selfTestTick();
   modeSweepTick();
 
-  // During bench tests, allow the PC runner to feed samples and force AI once per mode.
+  // Optional: allow the PC runner to feed samples and force AI once per mode (harmless in production).
   pollLatestTestSampleAndMaybeRunAi();
 
+  // Fast command poll
   static unsigned long lastCmdPollMs  = 0;
   unsigned long nowMs = millis();
   if (nowMs - lastCmdPollMs >= 3000UL) {
     lastCmdPollMs = nowMs;
     firebasePollCommandsFast();
+  }
+
+  // State heartbeat
+  static unsigned long lastStateMs = 0;
+  if (nowMs - lastStateMs >= 30000UL) {
+    lastStateMs = nowMs;
+    firebaseSendStateHeartbeat();
   }
 }

@@ -9,7 +9,7 @@
 // Shared readings struct (yours)
 // ------------------------------
 struct ApexLatest {
-  String date;     // xml date or json epoch string
+  String date;     // xml date string or json epoch string
   float tempF = NAN;
   float ph    = NAN;
   float alk   = NAN;
@@ -97,107 +97,162 @@ static bool parseApexLatestXml(const String& xml, ApexLatest& out) {
 
 // =====================================================
 // JSON PARSER for /cgi-bin/status.json
+// Supports BOTH shapes:
+//  A) { "istat": { "date":..., "inputs":[...] } }
+//  B) { "system":{ "date":... }, "inputs":[...], ... }   <-- your REST payload
 // =====================================================
 static bool parseApexStatusJson(const String& payload, ApexLatest& out) {
   if (payload.length() < 10) return false;
-    out = ApexLatest(); 
+  out = ApexLatest();
+
   // If you see memory issues, switch to StaticJsonDocument with a fixed size.
-  DynamicJsonDocument doc(64 * 1024); // adjust if needed
+  DynamicJsonDocument doc(96 * 1024); // bumped a bit for big payloads
   DeserializationError err = deserializeJson(doc, payload);
   if (err) {
     Serial.printf("APEX JSON parse error: %s\n", err.c_str());
     return false;
   }
 
-  JsonVariant istat = doc["istat"];
-  if (istat.isNull()) return false;
+  // Detect where the inputs array lives
+  JsonArray inputs;
+  String dateStr;
 
-  // date is epoch in your sample: "date": 1771868644
-  if (!istat["date"].isNull()) {
-    out.date = String((long)istat["date"]);
+  // Shape A
+  JsonVariant istat = doc["istat"];
+  if (!istat.isNull()) {
+    if (!istat["date"].isNull()) dateStr = String((long)istat["date"]);
+    inputs = istat["inputs"].as<JsonArray>();
   }
 
-  JsonArray inputs = istat["inputs"].as<JsonArray>();
-  if (inputs.isNull()) return false;
+  // Shape B (REST)
+  if (inputs.isNull()) {
+    JsonVariant sys = doc["system"];
+    if (!sys.isNull() && !sys["date"].isNull()) dateStr = String((long)sys["date"]);
+    inputs = doc["inputs"].as<JsonArray>();
+  }
 
-  float tempTank = NAN, tempSump = NAN;
-  float phReef   = NAN, phKalk   = NAN;
+  if (inputs.isNull()) return false;
+  if (dateStr.length()) out.date = dateStr;
+
+  // We’ll prefer your known names if present, but also accept “first of type” fallbacks.
+  float tempFound = NAN;
+  float phFound   = NAN;
 
   for (JsonObject it : inputs) {
     const char* typeC = it["type"] | "";
     const char* nameC = it["name"] | "";
     float v = it["value"].isNull() ? NAN : (float)it["value"];
 
+    if (!isfinite(v)) continue;
+
     String type(typeC);
     String name(nameC);
 
-    // Temperature
-    if (type == "Temp" && isfinite(v)) {
-      if (name == "TMP-TK") tempTank = v;
-      else if (name == "TMP-SP") tempSump = v;
+    // Temp
+    if (type == "Temp") {
+      if (name == "Tmp" || name == "TMP" || name.indexOf("Tmp") >= 0) tempFound = v;
+      else if (!isfinite(tempFound)) tempFound = v; // fallback: first Temp
     }
 
     // pH
-    if (type == "pH" && isfinite(v)) {
-      if (name == "ReefPH") phReef = v;
-      else if (name.indexOf("kalk") >= 0 || name.indexOf("Kalk") >= 0) phKalk = v;
-      else if (!isfinite(phReef)) phReef = v; // fallback
+    if (type == "pH") {
+      if (name == "SumppH" || name.indexOf("Sump") >= 0) phFound = v;
+      else if (!isfinite(phFound)) phFound = v; // fallback: first pH
     }
 
-    // Salt/Conductivity (your sample uses Cond + name Salt)
-    if (type == "Cond" && name == "Salt" && isfinite(v)) {
-      out.cond = v;
+    // Conductivity / salinity
+    if (type == "Cond") {
+      if (name == "Salt" || name.indexOf("Salt") >= 0) out.cond = v;
+      else if (!isfinite(out.cond)) out.cond = v; // fallback: first Cond
     }
 
-    // Trident values
-    if (type == "alk" && isfinite(v)) out.alk = v;
-    if (type == "ca"  && isfinite(v)) out.ca  = v;
-    if (type == "mg"  && isfinite(v)) out.mg  = v;
+    // Trident
+    if (type == "alk") out.alk = v;
+    if (type == "ca")  out.ca  = v;
+    if (type == "mg")  out.mg  = v;
   }
 
-  out.tempF = isfinite(tempTank) ? tempTank : tempSump;
-  out.ph    = isfinite(phReef)   ? phReef   : phKalk;
+  out.tempF = tempFound;
+  out.ph    = phFound;
 
-  // Must have at least temp or pH or something to be "valid"
+  // Must have at least one meaningful value to call it valid
   return (isfinite(out.tempF) || isfinite(out.ph) || isfinite(out.cond) ||
           isfinite(out.alk) || isfinite(out.ca) || isfinite(out.mg));
 }
 
 // =====================================================
-// GET STATE: chooses XML or JSON based on apexJson flag
+// HTTP helper
 // =====================================================
-String ApexApi::getState() {
-  String body = "";
-
-  // Your Apex URLs are http:// (NOT https://), so use WiFiClient, not WiFiClientSecure
+static bool httpGetBody(const String& url, String& bodyOut) {
+  bodyOut = "";
   WiFiClient client;
   HTTPClient http;
 
-  String url;
-  if (apexJson) url = "http://" + apexIp + "/cgi-bin/status.json";
-  else          url = "http://" + apexIp + "/cgi-bin/status.xml";
-
   if (!http.begin(client, url)) {
     Serial.println("http.begin() failed");
-    return "";
+    return false;
   }
+
+  // keep it snappy so fallback doesn’t stall your loop
+  http.setTimeout(2500);
 
   int httpCode = http.GET();
-  if (httpCode > 0) {
-    Serial.printf("HTTP GET... code: %d\n", httpCode);
-    body = http.getString();
-    // Serial.println("Response: " + body); // can be huge; enable if debugging
-  } else {
-    Serial.printf("HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
+  if (httpCode <= 0) {
+    Serial.printf("HTTP GET failed (%s): %s\n", url.c_str(), http.errorToString(httpCode).c_str());
     http.end();
+    return false;
+  }
+
+  if (httpCode != 200) {
+    Serial.printf("HTTP GET %s -> %d\n", url.c_str(), httpCode);
+    http.end();
+    return false;
+  }
+
+  bodyOut = http.getString();
+  http.end();
+  return bodyOut.length() > 0;
+}
+
+// =====================================================
+// GET STATE with fallback:
+// - If apexJson==true:  try JSON first, then XML
+// - If apexJson==false: try XML first, then JSON
+// =====================================================
+String ApexApi::getState() {
+  if (apexIp.length() == 0) {
+    Serial.println("ApexApi: apexIp not set");
     return "";
   }
 
-  http.end();
+  const String urlJson = "http://" + apexIp + "/cgi-bin/status.json";
+  const String urlXml  = "http://" + apexIp + "/cgi-bin/status.xml";
 
+  auto tryJson = [&](String& body) -> bool {
+    if (!httpGetBody(urlJson, body)) return false;
+    bool ok = parseApexStatusJson(body, latest);
+    if (!ok) Serial.println("Apex JSON fetched but parse/values invalid");
+    return ok;
+  };
+
+  auto tryXml = [&](String& body) -> bool {
+    if (!httpGetBody(urlXml, body)) return false;
+    bool ok = parseApexLatestXml(body, latest);
+    if (!ok) Serial.println("Apex XML fetched but parse/values invalid");
+    return ok;
+  };
+
+  String body = "";
   bool ok = false;
-  if (apexJson) ok = parseApexStatusJson(body, latest);
-  else          ok = parseApexLatestXml(body, latest);
+
+  // Prefer based on flag, but ALWAYS fallback to the other.
+  if (apexJson) {
+    ok = tryJson(body);
+    if (!ok) ok = tryXml(body);
+  } else {
+    ok = tryXml(body);
+    if (!ok) ok = tryJson(body);
+  }
 
   if (ok) {
     Serial.println("Apex date: " + latest.date);
@@ -210,17 +265,19 @@ String ApexApi::getState() {
     setAlk(latest.alk);
     setCa(latest.ca);
     setMg(latest.mg);
+
     Serial.printf("CLASS: TempF=%.2f pH=%.2f Cond=%.2f Alk=%.2f Ca=%.1f Mg=%.0f\n",
-              getTempF(), getPh(), getCond(), getAlk(), getCa(), getMg());
+                  getTempF(), getPh(), getCond(), getAlk(), getCa(), getMg());
   } else {
-    Serial.println(apexJson ? "Failed to parse Apex JSON." : "Failed to parse Apex XML (no record found).");
+    Serial.println("Failed to fetch/parse Apex via JSON and XML.");
+    body = "";
   }
 
   return body;
 }
 
 // =====================================================
-// getters / setters (FIXED)
+// getters / setters (your fixed ones)
 // =====================================================
 float ApexApi::getTempF(){ return tempF; }
 float ApexApi::getPh(){ return ph; }

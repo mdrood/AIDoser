@@ -1,0 +1,209 @@
+{"system":{"hostname":"14FootReef","software":"5.12_CA25","hardware":"1.0","serial":"AC6:29165","type":"AC6","extra":{"sdver":"SA08G,3,5344,2,0","sddate": "221001","sdserial": 3595352216,"sdextDate": "221025","sdhealth": 1,"WWWVer": "PASS","TmpUart": "PASS","pH2Uart": "PASS","CondUart": "PASS","sdstat": {"reads":10987676,"writes":6652,"readErr":0,"writeErr":0 }},"timezone":"-5.00","date":1771894748}
+,"modules":[{"abaddr":1,"hwtype":"FMM","hwrev":2,"swrev":24,"swstat":"OK","pcount":156934,"pgood":156934,"perror":0,"reatt":0,"inact":0,"boot":false,"present":true,"extra":{}}
+,{"abaddr":2,"hwtype":"EB832","hwrev":1,"swrev":8,"swstat":"OK","pcount":156923,"pgood":156922,"perror":1,"reatt":0,"inact":0,"boot":false,"present":true,"extra":{}}
+,{"abaddr":3,"hwtype":"TRI","hwrev":2,"swrev":23,"swstat":"OK","pcount":156923,"pgood":156922,"perror":1,"reatt":2,"inact":0,"boot":false,"present":true,"extra":{"temp":600,"errorCode":0,"errorMask":65535,"status":"idle","lastCal":1770474542,"resetTime":[1770752541,1752341628,1770752541,1770752541,1770752541],"levels":[ 783.3,-3027.9,190.36,191.19,140.74]}}
+,{"abaddr":4,"hwtype":"FMM","hwrev":1,"swrev":24,"swstat":"OK","pcount":156937,"pgood":156936,"perror":1,"reatt":0,"inact":0,"boot":false,"present":true,"extra":{}}
+,{"abaddr":5,"hwtype":"EB832","hwrev":1,"swrev":8,"swstat":"OK","pcount":156923,"pgood":156922,"perror":1,"reatt":0,"inact":0,"boot":false,"present":true,"extra":{}}
+,{"abaddr":6,"hwtype":"PM1","hwrev":1,"swrev":7,"swstat":"OK","pcount":156933,"pgood":156931,"perror":2,"reatt":2,"inact":0,"boot":false,"present":true,"extra":{}}
+,{"abaddr":7,"hwtype":"EB832","hwrev":1,"swrev":8,"swstat":"OK","pcount":156923,"pgood":156921,"perror":2,"reatt":0,"inact":0,"boot":false,"present":true,"extra":{}}
+,{"abaddr":8,"hwtype":"DOS","hwrev":1,"swrev":12,"swstat":"OK","pcount":156933,"pgood":156932,"perror":1,"reatt":2,"inact":0,"boot":false,"present":true,"extra":{"status": []}}
+,{"abaddr":9,"hwtype":"DOS","hwrev":1,"swrev":12,"swstat":"OK","pcount":156933,"pgood":156931,"perror":1,"reatt":2,"inact":0,"boot":false,"present":true,"extra":{"status": []}}
+,{"abaddr":10,"hwtype":"DOS","hwrev":1,"swrev":12,"swstat":"OK","pcount":156932,"pgood":156931,"perror":1,"reatt":2,"inact":0,"boot":false,"present":true,"extra":{"status": []}}
+,{"abaddr":11,"hwtype":"EB832","hwrev":1,"swrev":8,"swstat":"OK","pcount":156922,"pgood":156921,"perror":1,"reatt":0,"inact":0,"boot":false,"present":true,"extra":{}}
+,{"abaddr":12,"hwtype":"FMM","hwrev":1,"swrev":24,"swstat":"OK","pcount":156936,"pgood":156936,"perror":0,"reatt":0,"inact":0,"boot":false,"present":true,"extra":{}}
+,{"abaddr":13,"hwtype":"MXM","hwrev":1,"swrev":1,"swstat":"OK","pcount":156725,"pgood":156725,"perror":0,"reatt":0,"inact":0,"boot":false,"present":true,"extra":{}}
+,{"abaddr":14,"hwtype":"PM1","hwrev":1,"swrev":7,"swstat":"OK","pcount":156932,"pgood":156932,"perror":0,"reatt":2,"inact":0,"boot":false,"present":true,"extra":{}}
+,{"abaddr":16,"hwtype":"EB832","hwrev":1,"swrev":8,"swstat":"OK","pcount":156923,"pgood":156923,"perror":0,"reatt":0,"inact":0,"boot":false,"present":true,"extra":{}}
+,{"abaddr":22,"hwtype":"VDM","hwrev":0,"swrev":13,"swstat":"OK","pcount":156932,"pgood":156932,"perror":0,"reatt":2,"inact":0,"boot":false,"present":true,"extra":{}}
+,{"abaddr":23,"hwtype":"AFS","hwrev":1,"swrev":2,"swstat":"OK","pcount":104908,"pgood":104908,"perror":0,"reatt":2,"inact":0,"boot":false,"present":true,"extra":{}}
+,{"abaddr":24,"hwtype":"AFS","hwrev":1,"swrev":2,"swstat":"OK","pcount":156919,"pgood":156919,"perror":0,"reatt":2,"inact":0,"boot":false,"present":true,"extra":{}}
+,{"abaddr":28,"hwtype":"AFS","hwrev":1,"swrev":2,"swstat":"OK","pcount":156919,"pgood":156918,"perror":1,"reatt":2,"inact":0,"boot":false,"present":true,"extra":{}}
+],"nstat":{"dhcp":true,"hostname":"14FootReef","ipaddr":"192.168.1.75","netmask":"255.255.255.0","gateway":"192.168.1.1","dns":["192.168.1.1","0.0.0.0"],"httpPort":80,"fusionEnable":true,"quality":0,"strength":0,"link":true,"wifiAPLock":false,"wifiEnable":true,"wifiAPPassword":"","ssid":"","wifiAP":false,"updateFirmware":false,"latestFirmware":"5.12_CA25"},"feed":{"name":0,"active":0}
+,"power":{"failed":1771740686,"restored":1771740753}
+,"outputs":[{"status":["RampUp","","OK",""],"name":"VarSpd1_I1","gid":"","type":"variable","ID":0,"did":"base_Var1"}
+,{"status":["RampDown","","OK",""],"name":"VarSpd2_I2","gid":"","type":"variable","ID":1,"did":"base_Var2"}
+,{"status":["old1","","OK",""],"name":"VarSpd3_I3","gid":"","type":"variable","ID":2,"did":"base_Var3"}
+,{"status":["Old","","OK",""],"name":"VarSpd4_I4","gid":"","type":"variable","ID":3,"did":"base_Var4"}
+,{"status":["AOF","","OK",""],"name":"SndAlm_I6","gid":"","type":"alert","ID":4,"did":"base_Alarm"}
+,{"status":["AOF","","OK",""],"name":"SndWrn_I7","gid":"","type":"alert","ID":5,"did":"base_Warn"}
+,{"status":["AOF","","OK",""],"name":"EmailAlm_I5","gid":"","type":"alert","ID":6,"did":"base_email"}
+,{"status":["AOF","","OK",""],"name":"Alarm_1_2","gid":"","type":"alert","ID":8,"did":"1_2"}
+,{"status":["AON","","OK",""],"name":"AllTanks","gid":"","type":"outlet","ID":9,"did":"2_1"}
+,{"status":["AON","","OK",""],"name":"ReefOnly","gid":"","type":"outlet","ID":10,"did":"2_2"}
+,{"status":["AON","","OK",""],"name":"NestAccess","gid":"","type":"outlet","ID":11,"did":"2_3"}
+,{"status":["OFF","","OK",""],"name":"BladeFuge","gid":"","type":"outlet","ID":12,"did":"2_4"}
+,{"status":["OFF","","OK",""],"name":"DeNitrateRec","gid":"","type":"outlet","ID":13,"did":"2_5"}
+,{"status":["OFF","","OK",""],"name":"SumpLight","gid":"","type":"outlet","ID":14,"did":"2_6"}
+,{"status":["AON","","OK",""],"name":"Notused2_7","gid":"","type":"outlet","ID":15,"did":"2_7"}
+,{"status":["AON","","OK",""],"name":"ProbePump","gid":"","type":"outlet","ID":16,"did":"2_8"}
+,{"status":["AOF","","OK",""],"name":"LinkA_2_9","gid":"","type":"24v","ID":17,"did":"2_9"}
+,{"status":["AON","","OK",""],"name":"notused","gid":"","type":"24v","ID":18,"did":"2_10"}
+,{"status":["TBL","","OK","2000","0"],"name":"AWC_IN_4_1","gid":"doser_8","type":"dos","ID":19,"did":"8_1"}
+,{"status":["TBL","","OK","2000","2000"],"name":"AWC_Out_4_2","gid":"doser_8","type":"dos","ID":20,"did":"8_2"}
+,{"status":["AOF","","OK",""],"name":"LinkA_4_1","gid":"","type":"24v","ID":21,"did":"4_1"}
+,{"status":["AOF","","OK",""],"name":"Alarm_4_2","gid":"","type":"alert","ID":22,"did":"4_2"}
+,{"status":["AON","","OK",""],"name":"CaRxRecirc_1","gid":"","type":"outlet","ID":23,"did":"5_1"}
+,{"status":["OFF","","OK",""],"name":"Bad16_2","gid":"","type":"outlet","ID":24,"did":"5_2"}
+,{"status":["AON","","OK",""],"name":"SumpAir16_3","gid":"","type":"outlet","ID":25,"did":"5_3"}
+,{"status":["AON","","OK",""],"name":"RoodMazz16_4","gid":"","type":"outlet","ID":26,"did":"5_4"}
+,{"status":["AON","","OK",""],"name":"cO2bubbl16_5","gid":"","type":"outlet","ID":27,"did":"5_5"}
+,{"status":["AON","","OK",""],"name":"KalStir16_6","gid":"","type":"outlet","ID":28,"did":"5_6"}
+,{"status":["AON","","OK",""],"name":"FragWaves_7","gid":"","type":"outlet","ID":29,"did":"5_7"}
+,{"status":["AOF","","OK",""],"name":"SKMwipe_16_8","gid":"","type":"outlet","ID":30,"did":"5_8"}
+,{"status":["AOF","","OK",""],"name":"LinkA_5_9","gid":"","type":"24v","ID":31,"did":"5_9"}
+,{"status":["AOF","","OK",""],"name":"LinkB_5_10","gid":"","type":"24v","ID":32,"did":"5_10"}
+,{"status":["OFF","","OK",""],"name":"ROTrans_11_1","gid":"","type":"outlet","ID":33,"did":"7_1"}
+,{"status":["OFF","","OK",""],"name":"SaltIn_11_2","gid":"","type":"outlet","ID":34,"did":"7_2"}
+,{"status":["AON","","OK",""],"name":"Freezer_11_3","gid":"","type":"outlet","ID":35,"did":"7_3"}
+,{"status":["AON","","OK",""],"name":"PWR_RO_11_4","gid":"","type":"outlet","ID":36,"did":"7_4"}
+,{"status":["AON","","OK",""],"name":"RO_FLT_11_5","gid":"","type":"outlet","ID":37,"did":"7_5"}
+,{"status":["ON","","OK",""],"name":"SaltMix_11_6","gid":"","type":"outlet","ID":38,"did":"7_6"}
+,{"status":["OFF","","OK",""],"name":"NotUSed11_7","gid":"","type":"outlet","ID":39,"did":"7_7"}
+,{"status":["AON","","OK",""],"name":"MOCSign_11_8","gid":"","type":"outlet","ID":40,"did":"7_8"}
+,{"status":["AOF","","OK",""],"name":"LinkA_7_9","gid":"","type":"24v","ID":41,"did":"7_9"}
+,{"status":["AOF","","OK",""],"name":"LinkB_7_10","gid":"","type":"24v","ID":42,"did":"7_10"}
+,{"status":["AOF","","OK",""],"name":"Trident_3_3","gid":"","type":"selector","ID":43,"did":"3_3"}
+,{"status":["AOF","","OK",""],"name":"Alk_3_4","gid":"","type":"selector","ID":44,"did":"3_4"}
+,{"status":["TBL","","OK","14900","0"],"name":"KalkDOS","gid":"doser_9","type":"dos","ID":45,"did":"9_1"}
+,{"status":["OFF","","OK","150000","0"],"name":"AmoniaDOS","gid":"doser_9","type":"dos","ID":46,"did":"9_2"}
+,{"status":["TBL","","OK","1000","0"],"name":"Calcium-DOS","gid":"doser_10","type":"dos","ID":47,"did":"10_1"}
+,{"status":["TBL","","OK","1000","0"],"name":"Lye225","gid":"doser_10","type":"dos","ID":48,"did":"10_2"}
+,{"status":["AON","","OK",""],"name":"SecCam_12_1","gid":"","type":"outlet","ID":49,"did":"11_1"}
+,{"status":["AON","","OK",""],"name":"MP60left12_2","gid":"","type":"outlet","ID":50,"did":"11_2"}
+,{"status":["AON","","OK",""],"name":"LinearP12_3","gid":"","type":"outlet","ID":51,"did":"11_3"}
+,{"status":["AON","","OK",""],"name":"MP60Rght12_4","gid":"","type":"outlet","ID":52,"did":"11_4"}
+,{"status":["OFF","","OK",""],"name":"Maintpol12_5","gid":"","type":"outlet","ID":53,"did":"11_5"}
+,{"status":["AON","","OK",""],"name":"haddiwav12_6","gid":"","type":"outlet","ID":54,"did":"11_6"}
+,{"status":["AON","","OK",""],"name":"IdolWave12_7","gid":"","type":"outlet","ID":55,"did":"11_7"}
+,{"status":["AON","","OK",""],"name":"NotUsed_12_8","gid":"","type":"outlet","ID":56,"did":"11_8"}
+,{"status":["AOF","","OK",""],"name":"LinkA_11_9","gid":"","type":"24v","ID":57,"did":"11_9"}
+,{"status":["AOF","","OK",""],"name":"LinkB_11_10","gid":"","type":"24v","ID":58,"did":"11_10"}
+,{"status":["AOF","","OK",""],"name":"LinkA_12_1","gid":"","type":"24v","ID":59,"did":"12_1"}
+,{"status":["AOF","","OK",""],"name":"Alarm_12_2","gid":"","type":"alert","ID":60,"did":"12_2"}
+,{"status":["AON","","","Missing"],"name":"Radion_13_1","gid":"0","type":"MXMLight|Ecotech|30G6P","ID":61,"did":"13_1"}
+,{"status":["AOF","","",""],"name":"Lunar_13_65","gid":"0","type":"MXMLight|Ecotech|30G6PL","ID":62,"did":"13_65"}
+,{"status":["TBL","","RC","OK"],"name":"MP60Left_Dsp","gid":"0","type":"MXMPump|Ecotech|Vortech","ID":63,"did":"13_8"}
+,{"status":["AON","","","OK"],"name":"Blade_13_9","gid":"0","type":"MXMLight|AI|Fuge","ID":64,"did":"13_9"}
+,{"status":["AON","","","OK"],"name":"Blade_13_10","gid":"0","type":"MXMLight|AI|Grow","ID":65,"did":"13_10"}
+,{"status":["AON","","","OK"],"name":"Blade_13_11","gid":"0","type":"MXMLight|AI|Grow","ID":66,"did":"13_11"}
+,{"status":["AON","100","OK",""],"intensity":100,"name":"BluLED_22_7","gid":"","type":"serial","ID":67,"did":"22_7"}
+,{"status":["AON","","OK",""],"name":"AtlasPWR_9_1","gid":"","type":"outlet","ID":68,"did":"16_1"}
+,{"status":["AON","","OK",""],"name":"AtlasPWR_9_2","gid":"","type":"outlet","ID":69,"did":"16_2"}
+,{"status":["AON","","OK",""],"name":"AtlasPWR_9_3","gid":"","type":"outlet","ID":70,"did":"16_3"}
+,{"status":["AON","","OK",""],"name":"AtlasPWR_9_4","gid":"","type":"outlet","ID":71,"did":"16_4"}
+,{"status":["AON","","OK",""],"name":"AtlasPWR_9_5","gid":"","type":"outlet","ID":72,"did":"16_5"}
+,{"status":["AON","","OK",""],"name":"AtlasPWR_9_6","gid":"","type":"outlet","ID":73,"did":"16_6"}
+,{"status":["AON","","OK",""],"name":"HelixFron9_7","gid":"","type":"outlet","ID":74,"did":"16_7"}
+,{"status":["AON","","OK",""],"name":"HelixBack9_8","gid":"","type":"outlet","ID":75,"did":"16_8"}
+,{"status":["AOF","","OK",""],"name":"LinkA_16_9","gid":"","type":"24v","ID":76,"did":"16_9"}
+,{"status":["AOF","","OK",""],"name":"LinkB_16_10","gid":"","type":"24v","ID":77,"did":"16_10"}
+,{"status":["AON","100","OK",""],"intensity":100,"name":"BluLED_22_8","gid":"","type":"serial","ID":78,"did":"22_8"}
+,{"status":["RampDown","2","OK",""],"intensity":2,"name":"VarSpd1_22_1","gid":"","type":"variable","ID":86,"did":"22_1"}
+,{"status":["RampDown","1","OK",""],"intensity":1,"name":"VarSpd2_22_2","gid":"","type":"variable","ID":87,"did":"22_2"}
+,{"status":["RampDown","1","OK",""],"intensity":1,"name":"VarSpd3_22_3","gid":"","type":"variable","ID":88,"did":"22_3"}
+,{"status":["RampDown","1","OK",""],"intensity":1,"name":"VarSpd4_22_4","gid":"","type":"variable","ID":89,"did":"22_4"}
+,{"status":["AON","100","OK",""],"intensity":100,"name":"BluLED_22_5","gid":"","type":"serial","ID":90,"did":"22_5"}
+,{"status":["AOF","0","OK",""],"intensity":0,"name":"WhtLED_22_6","gid":"","type":"serial","ID":91,"did":"22_6"}
+,{"status":["OFF","","OK",""],"name":"Haddi_23_1","gid":"","type":"afs","ID":92,"did":"23_1"}
+,{"status":["OFF","","OK",""],"name":"Idol_24_1","gid":"","type":"afs","ID":93,"did":"24_1"}
+,{"status":["TBL","","RC","OK"],"name":"MP60_13_7","gid":"0","type":"MXMPump|Ecotech|Vortech","ID":94,"did":"13_7"}
+,{"status":["OFF","","OK",""],"name":"Reef_28_1","gid":"","type":"afs","ID":99,"did":"28_1"}
+],"inputs":[{"did":"base_Temp","type":"Temp","name":"Tmp","value":76.6 }
+,{"did":"base_pH","type":"pH","name":"SumppH","value":8.21 }
+,{"did":"base_ORP","type":"ORP","name":"NegORP","value":120  }
+,{"did":"base_Cond","type":"Cond","name":"Salt","value":35.4 }
+,{"did":"2_P0","type":"Amps","name":"AllTanksA","value":2.8  }
+,{"did":"2_P1","type":"Amps","name":"ReefOnlyA","value":3.2  }
+,{"did":"2_P2","type":"Amps","name":"NestAccessA","value":0.0  }
+,{"did":"2_P3","type":"Amps","name":"BladeFugeA","value":0.0  }
+,{"did":"2_P4","type":"Amps","name":"DeNitrateRecA","value":0.0  }
+,{"did":"2_P5","type":"Amps","name":"SumpLightA","value":0.0  }
+,{"did":"2_P6","type":"Amps","name":"Notused2_7A","value":0.0  }
+,{"did":"2_P7","type":"Amps","name":"ProbePumpA","value":0.1  }
+,{"did":"2_P8","type":"pwr","name":"AllTanksW","value": 342 }
+,{"did":"2_P9","type":"pwr","name":"ReefOnlyW","value": 368 }
+,{"did":"2_P10","type":"pwr","name":"NestAccessW","value":   5 }
+,{"did":"2_P11","type":"pwr","name":"BladeFugeW","value":   0 }
+,{"did":"2_P12","type":"pwr","name":"DeNitrateRecW","value":   1 }
+,{"did":"2_P13","type":"pwr","name":"SumpLightW","value":   1 }
+,{"did":"2_P14","type":"pwr","name":"Notused2_7W","value":   0 }
+,{"did":"2_P15","type":"pwr","name":"ProbePumpW","value":  20 }
+,{"did":"2_P16","type":"volts","name":"Volt_2","value":117  }
+,{"did":"3_0","type":"alk","name":"Alkx3","value":6.69 }
+,{"did":"3_1","type":"ca","name":"Cax3","value": 470 }
+,{"did":"3_2","type":"mg","name":"Mgx3","value":1372 }
+,{"did":"4_P1","type":"gph","name":"CRX6pH","value":   0 }
+,{"did":"4_P2","type":"gph","name":"AllFlw","value":   0 }
+,{"did":"4_P3","type":"gph","name":"UVFlW4","value":   0 }
+,{"did":"5_P0","type":"Amps","name":"CaRxRecirc_1A","value":0.7  }
+,{"did":"5_P1","type":"Amps","name":"Bad16_2A","value":0.0  }
+,{"did":"5_P2","type":"Amps","name":"SumpAir16_3A","value":0.0  }
+,{"did":"5_P3","type":"Amps","name":"RoodMazz16_4A","value":3.0  }
+,{"did":"5_P4","type":"Amps","name":"cO2bubbl16_5A","value":0.0  }
+,{"did":"5_P5","type":"Amps","name":"KalStir16_6A","value":0.0  }
+,{"did":"5_P6","type":"Amps","name":"FragWaves_7A","value":2.9  }
+,{"did":"5_P7","type":"Amps","name":"SKMwipe_16_8A","value":0.0  }
+,{"did":"5_P8","type":"pwr","name":"CaRxRecirc_1W","value":  57 }
+,{"did":"5_P9","type":"pwr","name":"Bad16_2W","value":   2 }
+,{"did":"5_P10","type":"pwr","name":"SumpAir16_3W","value":   0 }
+,{"did":"5_P11","type":"pwr","name":"RoodMazz16_4W","value": 332 }
+,{"did":"5_P12","type":"pwr","name":"cO2bubbl16_5W","value":   1 }
+,{"did":"5_P13","type":"pwr","name":"KalStir16_6W","value":   2 }
+,{"did":"5_P14","type":"pwr","name":"FragWaves_7W","value": 287 }
+,{"did":"5_P15","type":"pwr","name":"SKMwipe_16_8W","value":   1 }
+,{"did":"5_P16","type":"volts","name":"Volt_5","value":118  }
+,{"did":"6_1","type":"pH","name":"CaRXPH","value":6.55 }
+,{"did":"7_P0","type":"Amps","name":"ROTrans_11_1A","value":0.0  }
+,{"did":"7_P1","type":"Amps","name":"SaltIn_11_2A","value":0.0  }
+,{"did":"7_P2","type":"Amps","name":"Freezer_11_3A","value":0.0  }
+,{"did":"7_P3","type":"Amps","name":"PWR_RO_11_4A","value":0.0  }
+,{"did":"7_P4","type":"Amps","name":"RO_FLT_11_5A","value":0.0  }
+,{"did":"7_P5","type":"Amps","name":"SaltMix_11_6A","value":0.4  }
+,{"did":"7_P6","type":"Amps","name":"NotUSed11_7A","value":0.0  }
+,{"did":"7_P7","type":"Amps","name":"MOCSign_11_8A","value":0.0  }
+,{"did":"7_P8","type":"pwr","name":"ROTrans_11_1W","value":   0 }
+,{"did":"7_P9","type":"pwr","name":"SaltIn_11_2W","value":   1 }
+,{"did":"7_P10","type":"pwr","name":"Freezer_11_3W","value":   1 }
+,{"did":"7_P11","type":"pwr","name":"PWR_RO_11_4W","value":   1 }
+,{"did":"7_P12","type":"pwr","name":"RO_FLT_11_5W","value":   0 }
+,{"did":"7_P13","type":"pwr","name":"SaltMix_11_6W","value":  39 }
+,{"did":"7_P14","type":"pwr","name":"NotUSed11_7W","value":   1 }
+,{"did":"7_P15","type":"pwr","name":"MOCSign_11_8W","value":   2 }
+,{"did":"7_P16","type":"volts","name":"Volt_7","value":120  }
+,{"did":"11_P0","type":"Amps","name":"SecCam_12_1A","value":0.5  }
+,{"did":"11_P1","type":"Amps","name":"MP60left12_2A","value":0.5  }
+,{"did":"11_P2","type":"Amps","name":"LinearP12_3A","value":0.3  }
+,{"did":"11_P3","type":"Amps","name":"MP60Rght12_4A","value":0.3  }
+,{"did":"11_P4","type":"Amps","name":"Maintpol12_5A","value":0.0  }
+,{"did":"11_P5","type":"Amps","name":"haddiwav12_6A","value":0.0  }
+,{"did":"11_P6","type":"Amps","name":"IdolWave12_7A","value":0.0  }
+,{"did":"11_P7","type":"Amps","name":"NotUsed_12_8A","value":0.0  }
+,{"did":"11_P8","type":"pwr","name":"SecCam_12_1W","value":  50 }
+,{"did":"11_P9","type":"pwr","name":"MP60left12_2W","value":  36 }
+,{"did":"11_P10","type":"pwr","name":"LinearP12_3W","value":  28 }
+,{"did":"11_P11","type":"pwr","name":"MP60Rght12_4W","value":  25 }
+,{"did":"11_P12","type":"pwr","name":"Maintpol12_5W","value":   0 }
+,{"did":"11_P13","type":"pwr","name":"haddiwav12_6W","value":   1 }
+,{"did":"11_P14","type":"pwr","name":"IdolWave12_7W","value":   5 }
+,{"did":"11_P15","type":"pwr","name":"NotUsed_12_8W","value":   5 }
+,{"did":"11_P16","type":"volts","name":"Volt_11","value":119  }
+,{"did":"14_0","type":"Temp","name":"Tmpx14","value":20.7 }
+,{"did":"14_1","type":"pH","name":"pH14ft","value":8.29 }
+,{"did":"16_P0","type":"Amps","name":"AtlasPWR_9_1A","value":0.0  }
+,{"did":"16_P1","type":"Amps","name":"AtlasPWR_9_2A","value":0.0  }
+,{"did":"16_P2","type":"Amps","name":"AtlasPWR_9_3A","value":0.0  }
+,{"did":"16_P3","type":"Amps","name":"AtlasPWR_9_4A","value":0.0  }
+,{"did":"16_P4","type":"Amps","name":"AtlasPWR_9_5A","value":0.0  }
+,{"did":"16_P5","type":"Amps","name":"AtlasPWR_9_6A","value":0.0  }
+,{"did":"16_P6","type":"Amps","name":"HelixFron9_7A","value":1.0  }
+,{"did":"16_P7","type":"Amps","name":"HelixBack9_8A","value":0.7  }
+,{"did":"16_P8","type":"pwr","name":"AtlasPWR_9_1W","value":   1 }
+,{"did":"16_P9","type":"pwr","name":"AtlasPWR_9_2W","value":   1 }
+,{"did":"16_P10","type":"pwr","name":"AtlasPWR_9_3W","value":   1 }
+,{"did":"16_P11","type":"pwr","name":"AtlasPWR_9_4W","value":   1 }
+,{"did":"16_P12","type":"pwr","name":"AtlasPWR_9_5W","value":   0 }
+,{"did":"16_P13","type":"pwr","name":"AtlasPWR_9_6W","value":   1 }
+,{"did":"16_P14","type":"pwr","name":"HelixFron9_7W","value": 120 }
+,{"did":"16_P15","type":"pwr","name":"HelixBack9_8W","value": 121 }
+,{"did":"16_P16","type":"volts","name":"Volt_16","value":119  }
+,{"did":"base_I1","name":"Sw1","type":"digital","value":0},{"did":"base_I2","name":"Sw2","type":"digital","value":0},{"did":"base_I3","name":"Sw3","type":"digital","value":0},{"did":"base_I4","name":"Sw4","type":"digital","value":0},{"did":"base_I5","name":"Sw5","type":"digital","value":0},{"did":"base_I6","name":"Sw6","type":"digital","value":0},{"did":"1_I1","name":"Swx1_1","type":"digital","value":0},{"did":"1_I2","name":"Swx1_2","type":"digital","value":0},{"did":"1_I3","name":"Swx1_3","type":"digital","value":0},{"did":"1_I4","name":"Swx1_4","type":"digital","value":0},{"did":"4_I1","name":"SHI8_1","type":"digital","value":0},{"did":"6_I1","name":"SMPHi1","type":"digital","value":0},{"did":"6_I2","name":"SMPLO2","type":"digital","value":0},{"did":"6_I3","name":"Swx6_3","type":"digital","value":0},{"did":"6_I4","name":"Swx6_4","type":"digital","value":0},{"did":"6_I5","name":"Swx6_5","type":"digital","value":0},{"did":"6_I6","name":"Swx6_6","type":"digital","value":0},{"did":"12_I1","name":"LD14_1","type":"digital","value":0},{"did":"12_I2","name":"LD14_2","type":"digital","value":0},{"did":"12_I3","name":"LD14_3","type":"digital","value":0},{"did":"12_I4","name":"LD14_4","type":"digital","value":0},{"did":"14_I1","name":"HRL_1","type":"digital","value":200},{"did":"14_I2","name":"HRR_2","type":"digital","value":200},{"did":"14_I3","name":"HIL_3","type":"digital","value":200},{"did":"14_I4","name":"HIR_4","type":"digital","value":200},{"did":"14_I5","name":"HHad_5","type":"digital","value":200},{"did":"14_I6","name":"HHad_6","type":"digital","value":200}],"link":{"linkState":3,"linkKey":"G9qXY7","link":false}}

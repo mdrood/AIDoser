@@ -1,0 +1,84 @@
+{"istat":{"hostname":"TheCompoundApex","software":"5.12_CA25","hardware":"1.0","serial":"AC5:36025","type":"AC5","extra":{"sdver":"SS16G,3,5344,2,0","sddate": "171001","sdserial": 3012374051,"sdextDate": "","sdhealth": 0,"WWWVer": "PASS","TmpUart": "PASS","pH2Uart": "PASS","CondUart": "PASS","sdstat": {"reads":526727920,"writes":133645,"readErr":0,"writeErr":1 }},"timezone":"-6.00","date":1771868644,
+"feed":{"name":0,"active":0}
+,
+"power":{"failed":1765892692,"restored":0}
+,
+"inputs":[{"did":"base_Temp","type":"Temp","name":"TMP-SP","value":77.0 }
+,{"did":"base_pH","type":"pH","name":"kalkpH","value":9.96 }
+,{"did":"base_pH2","type":"pH","name":"ReefPH","value":8.14 }
+,{"did":"base_Cond","type":"Cond","name":"Salt","value":35.7 }
+,{"did":"2_0","type":"alk","name":"Alkx2","value":10.00}
+,{"did":"2_1","type":"ca","name":"Cax2","value": 481 }
+,{"did":"2_2","type":"mg","name":"Mgx2","value":1455 }
+,{"did":"3_P0","type":"Amps","name":"MAIN_Pmp_1_1A","value":3.0  }
+,{"did":"3_P1","type":"Amps","name":"probstr_1_2A","value":0.0  }
+,{"did":"3_P2","type":"Amps","name":"GFO-Crbn_1_3A","value":0.8  }
+,{"did":"3_P3","type":"Amps","name":"Skmrcir_1_4A","value":1.4  }
+,{"did":"3_P4","type":"Amps","name":"Skim_9k_1_5A","value":1.4  }
+,{"did":"3_P5","type":"Amps","name":"UV-25wt_1_6A","value":0.2  }
+,{"did":"3_P6","type":"Amps","name":"UV-57wt_1_7A","value":0.4  }
+,{"did":"3_P7","type":"Amps","name":"spraypmp_1_8A","value":0.7  }
+,{"did":"3_P8","type":"pwr","name":"MAIN_Pmp_1_1W","value": 376 }
+,{"did":"3_P9","type":"pwr","name":"probstr_1_2W","value":   3 }
+,{"did":"3_P10","type":"pwr","name":"GFO-Crbn_1_3W","value":  60 }
+,{"did":"3_P11","type":"pwr","name":"Skmrcir_1_4W","value": 107 }
+,{"did":"3_P12","type":"pwr","name":"Skim_9k_1_5W","value": 113 }
+,{"did":"3_P13","type":"pwr","name":"UV-25wt_1_6W","value":  25 }
+,{"did":"3_P14","type":"pwr","name":"UV-57wt_1_7W","value":  50 }
+,{"did":"3_P15","type":"pwr","name":"spraypmp_1_8W","value":  60 }
+,{"did":"3_P16","type":"volts","name":"Volt_3","value":117  }
+,{"did":"4_P0","type":"gph","name":"WtrFLO","value":   0 }
+,{"did":"5_0","type":"Temp","name":"TMP-TK","value":76.6 }
+,{"did":"5_2","type":"ORP","name":"-OrpP1","value":166  }
+,{"did":"7_P0","type":"Amps","name":"A1ML_blk_2-1A","value":0.0  }
+,{"did":"7_P1","type":"Amps","name":"M50ml-gn-2-2A","value":0.0  }
+,{"did":"7_P2","type":"Amps","name":"C50MLred_2-3A","value":0.0  }
+,{"did":"7_P3","type":"Amps","name":"refug-2-4A","value":0.2  }
+,{"did":"7_P4","type":"Amps","name":"spulfer_2-5A","value":0.4  }
+,{"did":"7_P5","type":"Amps","name":"Kalksr_2_6A","value":0.0  }
+,{"did":"7_P6","type":"Amps","name":"ROSLT-XFR2-7A","value":0.0  }
+,{"did":"7_P7","type":"Amps","name":"unused_2_8A","value":0.0  }
+,{"did":"7_P8","type":"pwr","name":"A1ML_blk_2-1W","value":   0 }
+,{"did":"7_P9","type":"pwr","name":"M50ml-gn-2-2W","value":   0 }
+,{"did":"7_P10","type":"pwr","name":"C50MLred_2-3W","value":   0 }
+,{"did":"7_P11","type":"pwr","name":"refug-2-4W","value":  14 }
+,{"did":"7_P12","type":"pwr","name":"spulfer_2-5W","value":  28 }
+,{"did":"7_P13","type":"pwr","name":"Kalksr_2_6W","value":   1 }
+,{"did":"7_P14","type":"pwr","name":"ROSLT-XFR2-7W","value":   0 }
+,{"did":"7_P15","type":"pwr","name":"unused_2_8W","value":   0 }
+,{"did":"7_P16","type":"volts","name":"Volt_7","value":116  }
+,{"did":"base_I1","name":"IO1","type":"digital","value":0},{"did":"base_I2","name":"IO2","type":"digital","value":0},{"did":"base_I3","name":"IO3","type":"digital","value":0},{"did":"base_I4","name":"IO4","type":"digital","value":0},{"did":"base_I5","name":"IO5","type":"digital","value":0},{"did":"base_I6","name":"IO6","type":"digital","value":0},{"did":"4_I2","name":"Swx4_2","type":"digital","value":0},{"did":"4_I3","name":"Swx4_3","type":"digital","value":0},{"did":"4_I4","name":"Swx4_4","type":"digital","value":0},{"did":"5_I1","name":"HIRF1","type":"digital","value":200},{"did":"5_I2","name":"HIRF2","type":"digital","value":200},{"did":"5_I3","name":"HIPDR","type":"digital","value":200},{"did":"5_I4","name":"Smplow","type":"digital","value":200},{"did":"5_I5","name":"HISMP","type":"digital","value":200},{"did":"5_I6","name":"LOWSMP","type":"digital","value":200}],
+"outputs":[{"status":["ON","","OK",""],"name":"VarSpd1_I1","gid":"","type":"variable","ID":0,"did":"base_Var1"}
+,{"status":["ON","","OK",""],"name":"VarSpd2_I2","gid":"","type":"variable","ID":1,"did":"base_Var2"}
+,{"status":["ON","","OK",""],"name":"VarSpd3_I3","gid":"","type":"variable","ID":2,"did":"base_Var3"}
+,{"status":["ON","","OK",""],"name":"VarSpd4_I4","gid":"","type":"variable","ID":3,"did":"base_Var4"}
+,{"status":["AOF","","OK",""],"name":"SndAlm_I6","gid":"","type":"alert","ID":4,"did":"base_Alarm"}
+,{"status":["AOF","","OK",""],"name":"SndWrn_I7","gid":"","type":"alert","ID":5,"did":"base_Warn"}
+,{"status":["AOF","","OK",""],"name":"EmailAlm_I5","gid":"","type":"alert","ID":6,"did":"base_email"}
+,{"status":["AOF","","OK",""],"name":"Trident_2_3","gid":"","type":"selector","ID":8,"did":"2_3"}
+,{"status":["AOF","","OK",""],"name":"Alk_2_4","gid":"","type":"selector","ID":9,"did":"2_4"}
+,{"status":["OFF","","OK",""],"name":"FFM-spare","gid":"","type":"24v","ID":10,"did":"4_1"}
+,{"status":["OFF","","OK",""],"name":"Alarm_4_2","gid":"","type":"alert","ID":11,"did":"4_2"}
+,{"status":["TBL","","OK","11200","0"],"name":"Kalk_6_1","gid":"doser_6","type":"dos","ID":12,"did":"6_1"}
+,{"status":["TBL","","OK","150000","0"],"name":"DOS_RO_6_2","gid":"doser_6","type":"dos","ID":13,"did":"6_2"}
+,{"status":["AOF","","OK",""],"name":"A1ML_blk_2-1","gid":"","type":"outlet","ID":14,"did":"7_1"}
+,{"status":["OFF","","OK",""],"name":"M50ml-gn-2-2","gid":"","type":"outlet","ID":15,"did":"7_2"}
+,{"status":["AOF","","OK",""],"name":"C50MLred_2-3","gid":"","type":"outlet","ID":16,"did":"7_3"}
+,{"status":["AON","","OK",""],"name":"refug-2-4","gid":"","type":"outlet","ID":17,"did":"7_4"}
+,{"status":["AON","","OK",""],"name":"MAIN_Pmp_1_1","gid":"","type":"outlet","ID":18,"did":"3_1"}
+,{"status":["AON","","OK",""],"name":"probstr_1_2","gid":"","type":"outlet","ID":19,"did":"3_2"}
+,{"status":["AON","","OK",""],"name":"GFO-Crbn_1_3","gid":"","type":"outlet","ID":20,"did":"3_3"}
+,{"status":["AON","","OK",""],"name":"Skmrcir_1_4","gid":"","type":"outlet","ID":21,"did":"3_4"}
+,{"status":["AON","","OK",""],"name":"Skim_9k_1_5","gid":"","type":"outlet","ID":22,"did":"3_5"}
+,{"status":["AON","","OK",""],"name":"UV-25wt_1_6","gid":"","type":"outlet","ID":23,"did":"3_6"}
+,{"status":["AON","","OK",""],"name":"UV-57wt_1_7","gid":"","type":"outlet","ID":24,"did":"3_7"}
+,{"status":["AON","","OK",""],"name":"spraypmp_1_8","gid":"","type":"outlet","ID":25,"did":"3_8"}
+,{"status":["AOF","","OK",""],"name":"AWXC_out3_9","gid":"","type":"24v","ID":26,"did":"3_9"}
+,{"status":["AOF","","OK",""],"name":"AWXC_in3_10","gid":"","type":"24v","ID":27,"did":"3_10"}
+,{"status":["AON","","OK",""],"name":"spulfer_2-5","gid":"","type":"outlet","ID":28,"did":"7_5"}
+,{"status":["AON","","OK",""],"name":"Kalksr_2_6","gid":"","type":"outlet","ID":29,"did":"7_6"}
+,{"status":["OFF","","OK",""],"name":"ROSLT-XFR2-7","gid":"","type":"outlet","ID":30,"did":"7_7"}
+,{"status":["OFF","","OK",""],"name":"unused_2_8","gid":"","type":"outlet","ID":31,"did":"7_8"}
+,{"status":["OFF","","OK",""],"name":"LinkA_7_9","gid":"","type":"24v","ID":32,"did":"7_9"}
+,{"status":["OFF","","OK",""],"name":"LinkB_7_10","gid":"","type":"24v","ID":33,"did":"7_10"}
+],"link":{"linkState":3,"linkKey":"G9qXY7","link":false}}}
