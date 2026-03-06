@@ -1,4 +1,3 @@
-
 import time
 import json
 import requests
@@ -8,19 +7,9 @@ from urllib3.util.retry import Retry
 
 DB_URL = "https://aidoser-default-rtdb.firebaseio.com"
 DEVICE_ID = "reefDoser6"
-AUTH = ""  # set if you use auth token/secret
+AUTH = ""  # optional auth token
 
 # ---------------- TEST PLAN ----------------
-# Phase A: AI runs from /tests/latest WITHOUT selfTest (normal-mode AI trigger)
-# Phase B: AI runs from /tests/latest WITH selfTest (bench mode, optional)
-# Phase C: Schedule runs quickly (everyMin=1) and restores original schedule at end
-#
-# Nothing in firmware is modified by this script. It only touches RTDB paths:
-# - /devices/{id}/settings (dosingMode, doseSchedule)
-# - /devices/{id}/commands/selfTest
-# - /devices/{id}/tests/latest
-# It restores original settings at the end.
-
 TEST_MODES = [1, 2, 3, 4, 5, 6]
 
 POLL_SEC = 1.5
@@ -31,8 +20,15 @@ MODE_HARD_LIMIT_SEC = 90
 INJECT_TEST_SAMPLES = True
 SAMPLE_EVERY_SEC = 10
 
-# A stable "normal reef" sample
-FAKE_SAMPLE = {"tempF": 78.2, "ph": 8.10, "alk": 8.3, "ca": 440, "mg": 1350, "cond": 35.0}
+# Stable "normal reef" sample
+FAKE_SAMPLE = {
+    "tempF": 78.2,
+    "ph": 8.10,
+    "alk": 8.3,
+    "ca": 440,
+    "mg": 1350,
+    "cond": 35.0
+}
 
 # ---------------- HTTP HARDENING ----------------
 sess = requests.Session()
@@ -49,17 +45,22 @@ adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
 sess.mount("https://", adapter)
 sess.mount("http://", adapter)
 
+
 def now_ms() -> int:
     return int(time.time() * 1000)
+
 
 def log(msg: str):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
+
 def url(path: str) -> str:
     u = f"{DB_URL}{path}.json"
     if AUTH:
-        u += f"?auth={AUTH}"
+        sep = "&" if "?" in u else "?"
+        u += f"{sep}auth={AUTH}"
     return u
+
 
 def _req(method: str, path: str, json_body=None):
     u = url(path)
@@ -68,7 +69,9 @@ def _req(method: str, path: str, json_body=None):
         try:
             r = sess.request(method, u, json=json_body, timeout=20)
             if r.status_code >= 400:
-                raise RuntimeError(f"HTTP {method} {r.status_code} body={r.text[:300]}")
+                raise RuntimeError(f"HTTP {method} {r.status_code} body={r.text[:400]}")
+            if r.text.strip() == "":
+                return None
             return r.json()
         except (requests.exceptions.SSLError,
                 requests.exceptions.ConnectionError,
@@ -79,72 +82,99 @@ def _req(method: str, path: str, json_body=None):
             time.sleep(wait)
     raise RuntimeError(f"HTTP {method} failed after retries: {u} last={last}")
 
+
 def get(path: str):
     return _req("GET", path)
+
 
 def put(path: str, value):
     return _req("PUT", path, json_body=value)
 
+
 def patch(path: str, obj: dict):
     return _req("PATCH", path, json_body=obj)
+
+
+def post(path: str, value):
+    return _req("POST", path, json_body=value)
+
 
 def read_state():
     return get(f"/devices/{DEVICE_ID}/state") or {}
 
+
 def read_settings():
     return get(f"/devices/{DEVICE_ID}/settings") or {}
+
 
 def read_settings_mode():
     return get(f"/devices/{DEVICE_ID}/settings/dosingMode")
 
+
 def save_original_settings():
     s = read_settings()
-    return {"dosingMode": s.get("dosingMode"), "doseSchedule": s.get("doseSchedule")}
+    return {
+        "dosingMode": s.get("dosingMode"),
+        "doseSchedule": s.get("doseSchedule"),
+        "aiIntervalMin": s.get("aiIntervalMin"),
+    }
+
 
 def restore_original_settings(orig):
     try:
         patch(f"/devices/{DEVICE_ID}/settings", {
             "dosingMode": orig.get("dosingMode"),
             "doseSchedule": orig.get("doseSchedule"),
+            "aiIntervalMin": orig.get("aiIntervalMin"),
             "updatedAt": now_ms()
         })
         log("Restored original settings.")
     except Exception as e:
         log(f"WARNING: Failed to restore original settings: {e}")
 
+
 def set_mode(mode: int):
-    patch(f"/devices/{DEVICE_ID}/settings", {"dosingMode": mode, "updatedAt": now_ms()})
+    patch(f"/devices/{DEVICE_ID}/settings", {
+        "dosingMode": mode,
+        "updatedAt": now_ms()
+    })
     log(f"Requested mode => {mode} (settings/dosingMode)")
+
 
 def wait_for_mode_applied(mode: int, timeout_sec: int) -> bool:
     deadline = time.time() + timeout_sec
     while time.time() < deadline:
         try:
-            if read_state().get("dosingMode") == mode:
+            state_mode = read_state().get("dosingMode")
+            if state_mode == mode:
                 return True
         except Exception:
             pass
+
         try:
-            if read_settings_mode() == mode:
+            settings_mode = read_settings_mode()
+            if settings_mode == mode:
                 return True
         except Exception:
             pass
+
         time.sleep(POLL_SEC)
     return False
 
+
 def disable_schedule():
     try:
-        patch(f"/devices/{DEVICE_ID}/settings/doseSchedule", {"enabled": False, "updatedAt": now_ms()})
+        patch(f"/devices/{DEVICE_ID}/settings/doseSchedule", {
+            "enabled": False,
+            "updatedAt": now_ms()
+        })
         patch(f"/devices/{DEVICE_ID}/settings", {"updatedAt": now_ms()})
         log("Disabled schedule (doseSchedule.enabled=false)")
     except Exception as e:
         log(f"WARNING: couldn't disable schedule: {e}")
 
+
 def enable_fast_schedule_every_minute():
-    """
-    Makes schedule run quickly for testing (everyMin=1) and a wide window.
-    We restore original schedule at the end.
-    """
     try:
         patch(f"/devices/{DEVICE_ID}/settings/doseSchedule", {
             "enabled": True,
@@ -158,17 +188,40 @@ def enable_fast_schedule_every_minute():
     except Exception as e:
         log(f"WARNING: couldn't enable fast schedule: {e}")
 
-def write_tests_latest(mode: int, sample: dict, source: str):
+
+def set_ai_interval_min(minutes: int):
+    patch(f"/devices/{DEVICE_ID}/settings", {
+        "aiIntervalMin": minutes,
+        "updatedAt": now_ms()
+    })
+    log(f"Set aiIntervalMin={minutes}")
+
+
+def write_test_sample(mode: int, sample: dict, source: str):
+    """
+    Current firmware uses two different paths:
+    - normal scheduler path reads from /tests (latest by timestamp)
+    - bench path still reads /tests/latest
+    So we write to BOTH.
+    """
     payload = dict(sample)
     payload["mode"] = mode
     payload["timestamp"] = now_ms()
     payload["source"] = source
+
+    # old bench path
     put(f"/devices/{DEVICE_ID}/tests/latest", payload)
-    log(f"Wrote /tests/latest (mode {mode}) ts={payload['timestamp']} source={source}")
+
+    # current normal scheduler path
+    post(f"/devices/{DEVICE_ID}/tests", payload)
+
+    log(f"Wrote sample to /tests/latest and /tests (mode {mode}) ts={payload['timestamp']} source={source}")
+
 
 def set_selftest(flag: bool):
     put(f"/devices/{DEVICE_ID}/commands/selfTest", bool(flag))
     log(f"Set /commands/selfTest={flag}")
+
 
 def trigger_selftest_edge():
     try:
@@ -178,6 +231,7 @@ def trigger_selftest_edge():
     time.sleep(0.8)
     set_selftest(True)
     log("Triggered /commands/selfTest (false->true)")
+
 
 def wait_for_selftest_active(timeout_sec: int) -> bool:
     deadline = time.time() + timeout_sec
@@ -189,6 +243,7 @@ def wait_for_selftest_active(timeout_sec: int) -> bool:
             pass
         time.sleep(POLL_SEC)
     return False
+
 
 def wait_for_ai_confirm(mode: int, min_epoch_ms: int, timeout_sec: int) -> bool:
     deadline = time.time() + timeout_sec
@@ -205,10 +260,8 @@ def wait_for_ai_confirm(mode: int, min_epoch_ms: int, timeout_sec: int) -> bool:
         time.sleep(POLL_SEC)
     return False
 
+
 def wait_for_pending_change(base_pending: dict, timeout_sec: int) -> bool:
-    """
-    Confirms that *something* about pendingMl changed (schedule or dosing tick).
-    """
     deadline = time.time() + timeout_sec
     while time.time() < deadline:
         try:
@@ -222,10 +275,11 @@ def wait_for_pending_change(base_pending: dict, timeout_sec: int) -> bool:
         time.sleep(POLL_SEC)
     return False
 
+
 def run_ai_from_tests_without_selftest(mode: int):
     """
-    Your MOST IMPORTANT test: AI runs in normal mode when /tests/latest updates.
-    This does NOT require selfTest.
+    Most important test:
+    normal scheduler AI run from manual test samples, no selfTest required.
     """
     log("-" * 72)
     log(f"AI NORMAL TEST (no selfTest): mode {mode}")
@@ -238,23 +292,24 @@ def run_ai_from_tests_without_selftest(mode: int):
     else:
         log(f"WARNING: mode {mode} not reflected within {WAIT_MODE_APPLY_SEC}s.")
 
-    # keep schedule off for this phase
     disable_schedule()
+    set_ai_interval_min(1)
 
-    # Write tests/latest twice to guarantee firmware sees it
-    write_tests_latest(mode, FAKE_SAMPLE, source="pc_test_runner_normal")
+    # Write twice so firmware definitely sees a fresh sample
+    write_test_sample(mode, FAKE_SAMPLE, source="pc_test_runner_normal")
     time.sleep(1.2)
-    write_tests_latest(mode, FAKE_SAMPLE, source="pc_test_runner_normal")
+    write_test_sample(mode, FAKE_SAMPLE, source="pc_test_runner_normal")
 
-    # Confirm AI ran
-    if wait_for_ai_confirm(mode, min_epoch_ms=base_ai_epoch + 1, timeout_sec=30):
-        log(f"PASS: AI ran from /tests/latest (mode {mode}) without selfTest.")
+    if wait_for_ai_confirm(mode, min_epoch_ms=base_ai_epoch + 1, timeout_sec=90):
+        log(f"PASS: AI ran from manual test sample in normal mode {mode}.")
     else:
-        log(f"FAIL: AI did NOT confirm within 30s for mode {mode} (no selfTest).")
+        log(f"FAIL: AI did NOT confirm within 90s for mode {mode}.")
+
 
 def run_mode_with_selftest(mode: int):
     """
-    Bench flow: selfTest triggers pump bursts + optional AI.
+    Bench flow:
+    selfTest pump bursts + /tests/latest AI path.
     """
     log("=" * 72)
     log(f"BENCH MODE {mode} (selfTest + /tests/latest)")
@@ -268,28 +323,29 @@ def run_mode_with_selftest(mode: int):
         log(f"WARNING: mode {mode} not reflected within {WAIT_MODE_APPLY_SEC}s.")
 
     disable_schedule()
-
     trigger_selftest_edge()
+
     if wait_for_selftest_active(WAIT_SELFTEST_START_SEC):
         log("selfTestActive TRUE (started).")
     else:
-        log("WARNING: selfTestActive didn't show TRUE (still writing tests/latest).")
+        log("WARNING: selfTestActive didn't show TRUE (still writing test samples).")
 
-    # feed samples during selfTest
-    write_tests_latest(mode, FAKE_SAMPLE, source="pc_test_runner_bench")
+    write_test_sample(mode, FAKE_SAMPLE, source="pc_test_runner_bench")
     time.sleep(1.2)
-    write_tests_latest(mode, FAKE_SAMPLE, source="pc_test_runner_bench")
+    write_test_sample(mode, FAKE_SAMPLE, source="pc_test_runner_bench")
 
     end = time.time() + MODE_HARD_LIMIT_SEC
     next_sample = time.time() + SAMPLE_EVERY_SEC
+    ai_confirmed = False
 
     while time.time() < end:
-        if wait_for_ai_confirm(mode, min_epoch_ms=base_ai_epoch + 1, timeout_sec=0):
+        if wait_for_ai_confirm(mode, min_epoch_ms=base_ai_epoch + 1, timeout_sec=1):
+            ai_confirmed = True
             break
 
         if INJECT_TEST_SAMPLES and time.time() >= next_sample:
             next_sample = time.time() + SAMPLE_EVERY_SEC
-            write_tests_latest(mode, FAKE_SAMPLE, source="pc_test_runner_bench")
+            write_test_sample(mode, FAKE_SAMPLE, source="pc_test_runner_bench")
 
         try:
             if read_state().get("selfTestActive") is False:
@@ -300,15 +356,18 @@ def run_mode_with_selftest(mode: int):
 
         time.sleep(POLL_SEC)
 
+    if not ai_confirmed:
+        log(f"WARNING: no AI confirm observed during bench mode {mode}.")
+
     try:
         set_selftest(False)
     except Exception as e:
         log(f"WARNING: clearing selfTest failed: {e}")
 
+
 def run_fast_schedule_smoke(mode: int):
     """
-    Proves the scheduler ticks in production code WITHOUT waiting 12 hours.
-    Temporarily set everyMin=1 for ~2-3 minutes.
+    Proves the scheduler ticks in production code without waiting hours.
     """
     log("-" * 72)
     log(f"SCHEDULE SMOKE TEST (fast): mode {mode}")
@@ -316,7 +375,6 @@ def run_fast_schedule_smoke(mode: int):
     set_mode(mode)
     wait_for_mode_applied(mode, WAIT_MODE_APPLY_SEC)
 
-    # Ensure selfTest is OFF (we want normal scheduler behavior)
     try:
         set_selftest(False)
     except Exception:
@@ -330,12 +388,13 @@ def run_fast_schedule_smoke(mode: int):
     if wait_for_pending_change(base_pending, timeout_sec=150):
         log("PASS: schedule tick observed (pendingMl changed).")
     else:
-        log("FAIL: no pendingMl change detected within 150s. (Scheduler may not change pendingMl in your build.)")
+        log("FAIL: no pendingMl change detected within 150s.")
 
     disable_schedule()
 
+
 def main():
-    log("Starting AI Doser Production Test Runner v2")
+    log("Starting AI Doser Production Test Runner v3")
 
     meta = get(f"/devices/{DEVICE_ID}/meta") or {}
     log("Meta:\n" + json.dumps(meta, indent=2))
@@ -344,15 +403,15 @@ def main():
     log("Saved original settings:\n" + json.dumps(orig, indent=2))
 
     try:
-        # Phase A: AI must run from test input with NO selfTest (most important)
+        # Phase A: normal scheduler AI from manual samples
         for m in TEST_MODES:
             run_ai_from_tests_without_selftest(m)
 
-        # Phase B: Optional bench (pump bursts + AI confirm)
+        # Phase B: optional bench/selfTest
         for m in TEST_MODES:
             run_mode_with_selftest(m)
 
-        # Phase C: Schedule smoke (fast)
+        # Phase C: schedule smoke
         mode_for_sched = orig.get("dosingMode") if isinstance(orig.get("dosingMode"), int) else 3
         run_fast_schedule_smoke(mode_for_sched)
 
@@ -362,6 +421,7 @@ def main():
         restore_original_settings(orig)
 
     log("All tests complete.")
+
 
 if __name__ == "__main__":
     main()
