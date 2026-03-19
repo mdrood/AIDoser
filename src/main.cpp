@@ -22,7 +22,7 @@
 
 // ---------------- SELF-TEST BUILD TOGGLE ----------------
 // Set to 0 for release builds if you want to completely remove the PC test hooks.
-#define ENABLE_SELFTEST 1
+#define ENABLE_SELFTEST 0
 #include <stdint.h>
 #include <Preferences.h>
 #include <nvs_flash.h>
@@ -41,10 +41,16 @@ void handleRoot();
 uint64_t getEpochMillis();
 String firebaseGetJson(const String& path);
 static uint64_t fnv1a64(const char* s);
-void pollApexAndPublish(bool allowAiUpdate);
+//void pollApexAndPublish(bool allowAiUpdate);
 static bool isValidIPv4(const String& ip);
 static bool apexValuesLookValid(float ca, float alk, float mg, float ph);
 static bool apexChangedEnough(float ca, float alk, float mg, float ph) ;
+
+static float mlPerDayForKey(const char* key);
+static float planMlPerDayForPump(int pumpIndex);
+static float* dosingPtrForKey(const char* key);
+static float getPumpFlowByIndex(int pumpIndex);
+void recalcChemConstantsForTank();
 
 WiFiManager wm;
 
@@ -76,10 +82,10 @@ float lastApexCurPh  = NAN;
 
 ///////////////////////////////////////////////////////////////////////////////////////
 // things you must change
-char DEVICE_ID[] = "reefDoser6";
+char DEVICE_ID[] = "reefDoser1";
 char TOPIC_SUFFIX[] = "mark1958";
 char NTFY_TOPIC[64];
-const char* FW_VERSION      = "3.0.3";
+const char* FW_VERSION      = "3.1.1";
 bool   apexEnabled = false;
 ////////////////////////////////////////////////////////////////////////////////////////
 
@@ -88,9 +94,13 @@ const long  GMT_OFFSET_SEC = -6 * 3600;
 const int   DST_OFFSET_SEC = 3600;
 
 bool globalEmergencyStop = false;
+static uint32_t gCurrentInputEpochSec = 0;
 
 // ===================== FIREBASE (REST API) =====================
 const char* FIREBASE_DB_URL = "https://aidoser-default-rtdb.firebaseio.com";
+
+static uint64_t gCachedAiIntervalMs = 12ULL * 60ULL * 60ULL * 1000ULL; // default 12h
+static uint32_t gLastAiIntervalPollMs = 0;
 
 // Pending buckets
 float pendingKalkMl = 0.0f;
@@ -210,7 +220,7 @@ String apexIp = "";
 
 void firebaseSetCalibrationStatus();
 void syncTimeFromFirebaseHeader();
-void pollApexAndPublish(bool allowAiUpdate);
+bool pollApexAndPublish(bool allowAiUpdate);
 bool firebasePatchJson(const String& path, const String& jsonBody);
 
 // ===================== AI breadcrumbs =====================
@@ -233,13 +243,24 @@ struct DosingConfig {
   float ml_per_day_afr;
   float ml_per_day_mg;
   float ml_per_day_tbd;
+
+  // NEW: real chemistry buckets for modes 4/5/6
+  float ml_per_day_alk;
+  float ml_per_day_ca;
+  float ml_per_day_cacl2;
+  float ml_per_day_naoh;
 };
 
 DosingConfig dosing = {
-  2000.0f,
-  20.0f,
-  0.0f,
-  0.0f
+  2000.0f, // kalk
+  20.0f,   // afr
+  0.0f,    // mg
+  0.0f,    // tbd
+
+  0.0f,    // alk
+  0.0f,    // ca
+  0.0f,    // cacl2
+  0.0f     // naoh
 };
 
 bool firebasePutJson(const String& path, const String& jsonBody);
@@ -252,10 +273,10 @@ void publishAiBreadcrumbs(const char* source, const char* reason,
   gAiLastInAlk = alk;
   gAiLastInMg  = mg;
   gAiLastInPh  = ph;
-  gAiLastPlanP1 = dosing.ml_per_day_kalk;
-  gAiLastPlanP2 = dosing.ml_per_day_afr;
-  gAiLastPlanP3 = dosing.ml_per_day_mg;
-  gAiLastPlanP4 = dosing.ml_per_day_tbd;
+  gAiLastPlanP1 = planMlPerDayForPump(1);
+  gAiLastPlanP2 = planMlPerDayForPump(2);
+  gAiLastPlanP3 = planMlPerDayForPump(3);
+  gAiLastPlanP4 = planMlPerDayForPump(4);
 
   if (source && source[0]) {
     strncpy(gAiLastSource, source, sizeof(gAiLastSource) - 1);
@@ -358,7 +379,7 @@ static float    gLastManualMg  = NAN;
 static float    gLastManualPh  = NAN;
 static float    gLastManualTbd = 0.0f;
 
-// Read /tests/latest and cache newest values (non-blocking, throttled)
+// Read /tests/ and cache newest values (non-blocking, throttled)
 static void pollManualInputs() {
   static uint32_t lastPollMs = 0;
   const uint32_t now = millis();
@@ -411,15 +432,30 @@ static void pollManualInputs() {
 static uint64_t gLastAiRunMs = 0;
 
 static uint64_t readAiIntervalMs() {
+
+  const uint32_t now = millis();
+
+  // Only check Firebase every 5 minutes
+  if (now - gLastAiIntervalPollMs < 300000UL) {
+    return gCachedAiIntervalMs;
+  }
+
+  gLastAiIntervalPollMs = now;
+
   String body = firebaseGetJson("/devices/" + String(DEVICE_ID) + "/settings/aiIntervalMin");
   body.trim();
+
   if (body.length() && body != "null") {
     int minv = body.toInt();
     if (minv >= 1 && minv <= 7 * 24 * 60) {
-      return (uint64_t)minv * 60ULL * 1000ULL;
+      gCachedAiIntervalMs = (uint64_t)minv * 60ULL * 1000ULL;
+      return gCachedAiIntervalMs;
     }
   }
-  return 12ULL * 60ULL * 60ULL * 1000ULL;
+
+  // fallback default
+  gCachedAiIntervalMs = 12ULL * 60ULL * 60ULL * 1000ULL;
+  return gCachedAiIntervalMs;
 }
 bool gSelfTestActive = false;
 bool gModeSweepActive = false;
@@ -457,12 +493,18 @@ static void runAiScheduler() {
   if (useApex) {
     gAiCurrentSource = "apex";
     Serial.println("AI SCHED: running from APEX inputs");
-    onNewTestInput(lastApexCurCa, lastApexCurAlk, lastApexCurMg, lastApexCurPh, 0.0f);
+    gCurrentInputEpochSec = (uint32_t)(getEpochMillis() / 1000ULL);
+onNewTestInput(lastApexCurCa, lastApexCurAlk, lastApexCurMg, lastApexCurPh, 0.0f);
+gCurrentInputEpochSec = 0;
+    //onNewTestInput(lastApexCurCa, lastApexCurAlk, lastApexCurMg, lastApexCurPh, 0.0f);
     publishAiBreadcrumbs("apex", "sched", lastApexCurCa, lastApexCurAlk, lastApexCurMg, lastApexCurPh);
   } else {
     gAiCurrentSource = "manual";
 Serial.println("AI SCHED: running from MANUAL inputs (/tests latest by timestamp)");
-    onNewTestInput(gLastManualCa, gLastManualAlk, gLastManualMg, gLastManualPh, gLastManualTbd);
+gCurrentInputEpochSec = (uint32_t)(gLastManualSampleEpochMs / 1000ULL);
+onNewTestInput(gLastManualCa, gLastManualAlk, gLastManualMg, gLastManualPh, gLastManualTbd);
+gCurrentInputEpochSec = 0;
+    //onNewTestInput(gLastManualCa, gLastManualAlk, gLastManualMg, gLastManualPh, gLastManualTbd);
     publishAiBreadcrumbs("manual", "sched", gLastManualCa, gLastManualAlk, gLastManualMg, gLastManualPh);
   }
   gAiCurrentSource = prev;
@@ -697,7 +739,10 @@ float MG_PPM_PER_ML_MODE2_MG_TANK = 0.20f;
 
 float DKH_PER_ML_BRS_ALK_TANK   = 0.0f;
 float CA_PPM_PER_ML_BRS_CA_TANK = 0.0f;
+float BRS_ALK_MEQ_PER_L = 1900.0f;
+float BRS_CA_PPM_PER_L = 37000.0f;
 float MG_PPM_PER_ML_MODE3_MG_TANK = 0.20f;
+//other modes/////////
 
 // ===================== History =====================
 struct TestPoint {
@@ -724,7 +769,13 @@ float MAX_TBD_ML_PER_DAY  = 40.0f;
 
 uint32_t lastSafetyBackoffTs = 0;
 
-uint32_t nowSeconds() { return millis()/1000; }
+uint32_t nowSeconds() {
+  time_t nowSec = time(NULL);
+  if (nowSec > 1700000000) {   // real clock is valid
+    return (uint32_t)nowSec;
+  }
+  return millis() / 1000;
+}
 
 float clampf(float v, float vmin, float vmax){
   if(v < vmin) return vmin;
@@ -741,19 +792,60 @@ float adjustWithLimit(float current, float suggested){
   return current + delta;
 }
 
+static float* dosingPtrForKey(const char* key) {
+  if (!key) return nullptr;
+
+  if (strcmp(key, "kalk")  == 0) return &dosing.ml_per_day_kalk;
+  if (strcmp(key, "afr")   == 0) return &dosing.ml_per_day_afr;
+  if (strcmp(key, "mg")    == 0) return &dosing.ml_per_day_mg;
+  if (strcmp(key, "tbd")   == 0) return &dosing.ml_per_day_tbd;
+
+  if (strcmp(key, "alk")   == 0) return &dosing.ml_per_day_alk;
+  if (strcmp(key, "ca")    == 0) return &dosing.ml_per_day_ca;
+  if (strcmp(key, "cacl2") == 0) return &dosing.ml_per_day_cacl2;
+  if (strcmp(key, "naoh")  == 0) return &dosing.ml_per_day_naoh;
+
+  return nullptr;
+}
+
+static float getPumpFlowByIndex(int pumpIndex) {
+  switch (pumpIndex) {
+    case 1: return FLOW_KALK_ML_PER_MIN;
+    case 2: return FLOW_AFR_ML_PER_MIN;
+    case 3: return FLOW_MG_ML_PER_MIN;
+    case 4: return FLOW_TBD_ML_PER_MIN;
+    default: return 0.0f;
+  }
+}
+
+static float planMlPerDayForPump(int pumpIndex) {
+  const ModeCfg cfg = getModeCfg(gDosingMode);
+  switch (pumpIndex) {
+    case 1: return mlPerDayForKey(cfg.keyP1);
+    case 2: return mlPerDayForKey(cfg.keyP2);
+    case 3: return mlPerDayForKey(cfg.keyP3);
+    case 4: return mlPerDayForKey(cfg.keyP4);
+    default: return 0.0f;
+  }
+}
+
 // Map a mode "pumpKey" (kalk/afr/mg/tbd/none) to the current per-day dosing target (ml/day).
 // NOTE: These dosing.ml_per_day_* values are "per CHEM", while pending* buckets are "per PUMP".
 static float mlPerDayForKey(const char* key) {
   if (!key) return 0.0f;
-  if (strcmp(key, "kalk") == 0) return dosing.ml_per_day_kalk;
-  if (strcmp(key, "afr")  == 0) return dosing.ml_per_day_afr;
-  if (strcmp(key, "mg")   == 0) return dosing.ml_per_day_mg;
-  if (strcmp(key, "tbd")  == 0) return dosing.ml_per_day_tbd;
-  if (strcmp(key, "alk")  == 0) return dosing.ml_per_day_afr;
-  if (strcmp(key, "ca")   == 0) return dosing.ml_per_day_mg;
-  if (strcmp(key, "cacl2") == 0) return dosing.ml_per_day_afr;
-  if (strcmp(key, "naoh")  == 0) return dosing.ml_per_day_mg;
-  return 0.0f; // "none" or unknown
+
+  if (strcmp(key, "kalk")  == 0) return dosing.ml_per_day_kalk;
+  if (strcmp(key, "afr")   == 0) return dosing.ml_per_day_afr;
+  if (strcmp(key, "mg")    == 0) return dosing.ml_per_day_mg;
+  if (strcmp(key, "tbd")   == 0) return dosing.ml_per_day_tbd;
+
+  // NEW: real chemistry buckets
+  if (strcmp(key, "alk")   == 0) return dosing.ml_per_day_alk;
+  if (strcmp(key, "ca")    == 0) return dosing.ml_per_day_ca;
+  if (strcmp(key, "cacl2") == 0) return dosing.ml_per_day_cacl2;
+  if (strcmp(key, "naoh")  == 0) return dosing.ml_per_day_naoh;
+
+  return 0.0f;
 }
 
 void pushHistory(const TestPoint& tp){
@@ -893,7 +985,7 @@ void primeDoseSlotsForToday() {
 
 static ModeCfg getModeCfg(DosingMode mode);
 
-void updatePumpSchedules() {
+/*void updatePumpSchedules() {
   int activeSlots = (doseScheduleCfg.enabled) ? DOSE_SLOTS_PER_DAY : 3;
   if (activeSlots < 1) activeSlots = 1;
 
@@ -918,9 +1010,68 @@ void updatePumpSchedules() {
 
   Serial.printf("Schedules updated: P1=%.2fs P2=%.2fs P3=%.2fs P4=%.2fs (slots=%d)\n",
                 SEC_PER_DOSE_KALK, SEC_PER_DOSE_AFR, SEC_PER_DOSE_MG, SEC_PER_DOSE_TBD, activeSlots);
+}*/
+
+void updatePumpSchedules() {
+  int activeSlots = (doseScheduleCfg.enabled) ? DOSE_SLOTS_PER_DAY : 3;
+  if (activeSlots < 1) activeSlots = 1;
+
+  SEC_PER_DOSE_KALK = 0.0f;
+  SEC_PER_DOSE_AFR  = 0.0f;
+  SEC_PER_DOSE_MG   = 0.0f;
+  SEC_PER_DOSE_TBD  = 0.0f;
+
+  float ml1 = planMlPerDayForPump(1);
+  float ml2 = planMlPerDayForPump(2);
+  float ml3 = planMlPerDayForPump(3);
+  float ml4 = planMlPerDayForPump(4);
+
+  if (modeHasPump(1) && FLOW_KALK_ML_PER_MIN > 0.0f) {
+    SEC_PER_DOSE_KALK = ((ml1 / FLOW_KALK_ML_PER_MIN) * 60.0f) / activeSlots;
+  }
+  if (modeHasPump(2) && FLOW_AFR_ML_PER_MIN > 0.0f) {
+    SEC_PER_DOSE_AFR = ((ml2 / FLOW_AFR_ML_PER_MIN) * 60.0f) / activeSlots;
+  }
+  if (modeHasPump(3) && FLOW_MG_ML_PER_MIN > 0.0f) {
+    SEC_PER_DOSE_MG = ((ml3 / FLOW_MG_ML_PER_MIN) * 60.0f) / activeSlots;
+  }
+  if (modeHasPump(4) && FLOW_TBD_ML_PER_MIN > 0.0f) {
+    SEC_PER_DOSE_TBD = ((ml4 / FLOW_TBD_ML_PER_MIN) * 60.0f) / activeSlots;
+  }
+
+  Serial.printf(
+    "Schedules updated: P1=%.2fs P2=%.2fs P3=%.2fs P4=%.2fs (slots=%d)\n",
+    SEC_PER_DOSE_KALK, SEC_PER_DOSE_AFR, SEC_PER_DOSE_MG, SEC_PER_DOSE_TBD, activeSlots
+  );
 }
 
-void enforceChemSafetyCaps() {
+void recalcChemConstantsForTank() {
+
+  if (TANK_VOLUME_L <= 0.0f) return;
+
+  DKH_PER_ML_BRS_ALK_TANK =
+      ((BRS_ALK_MEQ_PER_L / 1000.0f) * 2.8f) / TANK_VOLUME_L;
+
+  CA_PPM_PER_ML_BRS_CA_TANK =
+      (BRS_CA_PPM_PER_L / 1000.0f) / TANK_VOLUME_L;
+
+  // NaOH mixed to same strength as soda ash
+  DKH_PER_ML_NAOH_TANK =
+      ((BRS_ALK_MEQ_PER_L / 1000.0f) * 2.8f) / TANK_VOLUME_L;
+
+  // CaCl2 calcium solution
+  CA_PPM_PER_ML_NACL_TANK =
+      (BRS_CA_PPM_PER_L / 1000.0f) / TANK_VOLUME_L;
+
+  Serial.printf(
+    "CHEM CONST: alk=%.6f  ca=%.6f  naoh=%.6f  cacl2=%.6f\n",
+    DKH_PER_ML_BRS_ALK_TANK,
+    CA_PPM_PER_ML_BRS_CA_TANK,
+    DKH_PER_ML_NAOH_TANK,
+    CA_PPM_PER_ML_NACL_TANK
+  );
+}
+/*void enforceChemSafetyCaps() {
   // Chemistry-based caps (keep rise per day sane). This is a scale-back, not a hard stop.
   float alkRise =
       dosing.ml_per_day_kalk * DKH_PER_ML_KALK_TANK +
@@ -957,6 +1108,59 @@ void enforceChemSafetyCaps() {
     dosing.ml_per_day_tbd  *= scale;
     Serial.printf("SAFETY: Scaling dosing by %.3f\n", scale);
   }
+}*/
+void enforceChemSafetyCaps() {
+  // Chemistry-based caps (keep rise per day sane). This is a scale-back, not a hard stop.
+  // Include all chemistry buckets used across modes 1..6.
+
+  float alkRise =
+      dosing.ml_per_day_kalk * DKH_PER_ML_KALK_TANK +
+      dosing.ml_per_day_afr  * DKH_PER_ML_AFR_TANK +
+      dosing.ml_per_day_alk  * DKH_PER_ML_BRS_ALK_TANK +
+      dosing.ml_per_day_naoh * DKH_PER_ML_NAOH_TANK;
+
+  float caRise =
+      dosing.ml_per_day_kalk  * CA_PPM_PER_ML_KALK_TANK +
+      dosing.ml_per_day_afr   * CA_PPM_PER_ML_AFR_TANK +
+      dosing.ml_per_day_ca    * CA_PPM_PER_ML_BRS_CA_TANK +
+      dosing.ml_per_day_cacl2 * CA_PPM_PER_ML_NACL_TANK;
+
+  float mgRise =
+      dosing.ml_per_day_afr * MG_PPM_PER_ML_AFR_TANK +
+      dosing.ml_per_day_mg  * MG_PPM_PER_ML_MG_TANK;
+
+  const float MAX_ALK_RISE_DKH_PER_DAY = 0.8f;
+  const float MAX_CA_RISE_PPM_PER_DAY  = 20.0f;
+  const float MAX_MG_RISE_PPM_PER_DAY  = 30.0f;
+
+  float scale = 1.0f;
+
+  if (alkRise > MAX_ALK_RISE_DKH_PER_DAY && alkRise > 0.0f) {
+    scale = min(scale, MAX_ALK_RISE_DKH_PER_DAY / alkRise);
+  }
+  if (caRise > MAX_CA_RISE_PPM_PER_DAY && caRise > 0.0f) {
+    scale = min(scale, MAX_CA_RISE_PPM_PER_DAY / caRise);
+  }
+  if (mgRise > MAX_MG_RISE_PPM_PER_DAY && mgRise > 0.0f) {
+    scale = min(scale, MAX_MG_RISE_PPM_PER_DAY / mgRise);
+  }
+
+  if (scale < 1.0f) {
+    dosing.ml_per_day_kalk  *= scale;
+    dosing.ml_per_day_afr   *= scale;
+    dosing.ml_per_day_mg    *= scale;
+    dosing.ml_per_day_tbd   *= scale;
+
+    dosing.ml_per_day_alk   *= scale;
+    dosing.ml_per_day_ca    *= scale;
+    dosing.ml_per_day_cacl2 *= scale;
+    dosing.ml_per_day_naoh  *= scale;
+
+    Serial.printf(
+      "SAFETY: Scaling dosing by %.3f (alkRise=%.3f, caRise=%.3f, mgRise=%.3f)\n",
+      scale, alkRise, caRise, mgRise
+    );
+  }
 }
 
 // ===================== Pump driver =====================
@@ -989,10 +1193,14 @@ void firebaseSendStateHeartbeat() {
   json += "\"doseSlotsPerDay\":" + String(max(1, DOSE_SLOTS_PER_DAY)) + ",";
 
   json += "\"dosingMlPerDay\":{";
-  json += "\"kalk\":" + String(dosing.ml_per_day_kalk, 2) + ",";
-  json += "\"afr\":"  + String(dosing.ml_per_day_afr,  2) + ",";
-  json += "\"mg\":"   + String(dosing.ml_per_day_mg,   2) + ",";
-  json += "\"tbd\":"  + String(dosing.ml_per_day_tbd,  2);
+  json += "\"kalk\":"  + String(dosing.ml_per_day_kalk,  2) + ",";
+  json += "\"afr\":"   + String(dosing.ml_per_day_afr,   2) + ",";
+  json += "\"mg\":"    + String(dosing.ml_per_day_mg,    2) + ",";
+  json += "\"tbd\":"   + String(dosing.ml_per_day_tbd,   2) + ",";
+  json += "\"alk\":"   + String(dosing.ml_per_day_alk,   2) + ",";
+  json += "\"ca\":"    + String(dosing.ml_per_day_ca,    2) + ",";
+  json += "\"cacl2\":" + String(dosing.ml_per_day_cacl2, 2) + ",";
+  json += "\"naoh\":"  + String(dosing.ml_per_day_naoh,  2);
   json += "},";
 
   json += "\"pendingMl\":{";
@@ -1011,7 +1219,7 @@ void firebaseSendStateHeartbeat() {
 
   json += "}";
 
-  firebasePutJson(pathState, json);
+  firebasePatchJson(pathState, json);
 }
 
 // ===================== TIME =====================
@@ -1057,7 +1265,7 @@ void initBucketPrefs() {
 }
 
 // ===================== Dosing prefs (minimal) =====================
-void loadDosingFromPrefs() {
+/*void loadDosingFromPrefs() {
   if (!dosingPrefs.begin("dosing", true)) {
     Serial.println("Prefs: failed to open dosing (read)");
     return;
@@ -1070,8 +1278,39 @@ void loadDosingFromPrefs() {
 
   Serial.printf("Prefs: loaded dosing KALK=%.2f AFR=%.2f MG=%.2f TBD=%.2f\n",
                 dosing.ml_per_day_kalk, dosing.ml_per_day_afr, dosing.ml_per_day_mg, dosing.ml_per_day_tbd);
+}*/
+void loadDosingFromPrefs() {
+  if (!dosingPrefs.begin("dosing", true)) {
+    Serial.println("Prefs: failed to open dosing (read)");
+    return;
+  }
+
+  dosing.ml_per_day_kalk  = dosingPrefs.getFloat("kalk",  dosing.ml_per_day_kalk);
+  dosing.ml_per_day_afr   = dosingPrefs.getFloat("afr",   dosing.ml_per_day_afr);
+  dosing.ml_per_day_mg    = dosingPrefs.getFloat("mg",    dosing.ml_per_day_mg);
+  dosing.ml_per_day_tbd   = dosingPrefs.getFloat("tbd",   dosing.ml_per_day_tbd);
+
+  // NEW
+  dosing.ml_per_day_alk   = dosingPrefs.getFloat("alk",   dosing.ml_per_day_alk);
+  dosing.ml_per_day_ca    = dosingPrefs.getFloat("ca",    dosing.ml_per_day_ca);
+  dosing.ml_per_day_cacl2 = dosingPrefs.getFloat("cacl2", dosing.ml_per_day_cacl2);
+  dosing.ml_per_day_naoh  = dosingPrefs.getFloat("naoh",  dosing.ml_per_day_naoh);
+
+  dosingPrefs.end();
+
+  Serial.printf(
+    "Prefs: loaded dosing KALK=%.2f AFR=%.2f MG=%.2f TBD=%.2f ALK=%.2f CA=%.2f CACL2=%.2f NAOH=%.2f\n",
+    dosing.ml_per_day_kalk,
+    dosing.ml_per_day_afr,
+    dosing.ml_per_day_mg,
+    dosing.ml_per_day_tbd,
+    dosing.ml_per_day_alk,
+    dosing.ml_per_day_ca,
+    dosing.ml_per_day_cacl2,
+    dosing.ml_per_day_naoh
+  );
 }
-void saveDosingToPrefs() {
+/*void saveDosingToPrefs() {
   if (!dosingPrefs.begin("dosing", false)) {
     Serial.println("Prefs: failed to open dosing (write)");
     return;
@@ -1084,7 +1323,39 @@ void saveDosingToPrefs() {
 
   Serial.printf("Prefs: saved dosing KALK=%.2f AFR=%.2f MG=%.2f TBD=%.2f\n",
                 dosing.ml_per_day_kalk, dosing.ml_per_day_afr, dosing.ml_per_day_mg, dosing.ml_per_day_tbd);
+}*/
+void saveDosingToPrefs() {
+  if (!dosingPrefs.begin("dosing", false)) {
+    Serial.println("Prefs: failed to open dosing (write)");
+    return;
+  }
+
+  dosingPrefs.putFloat("kalk",  dosing.ml_per_day_kalk);
+  dosingPrefs.putFloat("afr",   dosing.ml_per_day_afr);
+  dosingPrefs.putFloat("mg",    dosing.ml_per_day_mg);
+  dosingPrefs.putFloat("tbd",   dosing.ml_per_day_tbd);
+
+  // NEW
+  dosingPrefs.putFloat("alk",   dosing.ml_per_day_alk);
+  dosingPrefs.putFloat("ca",    dosing.ml_per_day_ca);
+  dosingPrefs.putFloat("cacl2", dosing.ml_per_day_cacl2);
+  dosingPrefs.putFloat("naoh",  dosing.ml_per_day_naoh);
+
+  dosingPrefs.end();
+
+  Serial.printf(
+    "Prefs: saved dosing KALK=%.2f AFR=%.2f MG=%.2f TBD=%.2f ALK=%.2f CA=%.2f CACL2=%.2f NAOH=%.2f\n",
+    dosing.ml_per_day_kalk,
+    dosing.ml_per_day_afr,
+    dosing.ml_per_day_mg,
+    dosing.ml_per_day_tbd,
+    dosing.ml_per_day_alk,
+    dosing.ml_per_day_ca,
+    dosing.ml_per_day_cacl2,
+    dosing.ml_per_day_naoh
+  );
 }
+
 void loadFlowFromPrefs() {
   if (!dosingPrefs.begin("flow", true)) {
     Serial.println("Prefs: failed to open flow (read)");
@@ -1137,10 +1408,15 @@ void resetAIState() {
   memset(historyBuf, 0, sizeof(historyBuf));
   lastTest    = {0, 0, 0, 0, 0, 0};
   currentTest = {0, 0, 0, 0, 0, 0};
-  dosing.ml_per_day_kalk = 2000.0f;
-  dosing.ml_per_day_afr  = 20.0f;
-  dosing.ml_per_day_mg   = 0.0f;
-  dosing.ml_per_day_tbd  = 0.0f;
+  dosing.ml_per_day_kalk  = 2000.0f;
+  dosing.ml_per_day_afr   = 20.0f;
+  dosing.ml_per_day_mg    = 0.0f;
+  dosing.ml_per_day_tbd   = 0.0f;
+
+  dosing.ml_per_day_alk   = 0.0f;
+  dosing.ml_per_day_ca    = 0.0f;
+  dosing.ml_per_day_cacl2 = 0.0f;
+  dosing.ml_per_day_naoh  = 0.0f;
   lastSafetyBackoffTs = nowSeconds();
   lastRemoteTestTimestampMs = 0;
   updatePumpSchedules();
@@ -1155,22 +1431,32 @@ void safetyBackoffIfNoTests() {
   if (now - lastSafetyBackoffTs < 86400UL) return;
 
   Serial.println("SAFETY: No tests >5 days. Backing off dosing to 70%.");
-  dosing.ml_per_day_kalk *= 0.7f;
-  dosing.ml_per_day_afr  *= 0.7f;
-  dosing.ml_per_day_mg   *= 0.7f;
-  dosing.ml_per_day_tbd  *= 0.7f;
 
-  dosing.ml_per_day_kalk = clampf(dosing.ml_per_day_kalk, 0.0f, MAX_KALK_ML_PER_DAY);
-  dosing.ml_per_day_afr  = clampf(dosing.ml_per_day_afr,  0.0f, MAX_AFR_ML_PER_DAY);
-  dosing.ml_per_day_mg   = clampf(dosing.ml_per_day_mg,   0.0f, MAX_MG_ML_PER_DAY);
-  dosing.ml_per_day_tbd  = clampf(dosing.ml_per_day_tbd,  0.0f, MAX_TBD_ML_PER_DAY);
+  dosing.ml_per_day_kalk  *= 0.7f;
+  dosing.ml_per_day_afr   *= 0.7f;
+  dosing.ml_per_day_mg    *= 0.7f;
+  dosing.ml_per_day_tbd   *= 0.7f;
+
+  dosing.ml_per_day_alk   *= 0.7f;
+  dosing.ml_per_day_ca    *= 0.7f;
+  dosing.ml_per_day_cacl2 *= 0.7f;
+  dosing.ml_per_day_naoh  *= 0.7f;
+
+  dosing.ml_per_day_kalk  = clampf(dosing.ml_per_day_kalk,  0.0f, MAX_KALK_ML_PER_DAY);
+  dosing.ml_per_day_afr   = clampf(dosing.ml_per_day_afr,   0.0f, MAX_AFR_ML_PER_DAY);
+  dosing.ml_per_day_mg    = clampf(dosing.ml_per_day_mg,    0.0f, MAX_MG_ML_PER_DAY);
+  dosing.ml_per_day_tbd   = clampf(dosing.ml_per_day_tbd,   0.0f, MAX_TBD_ML_PER_DAY);
+
+  dosing.ml_per_day_alk   = clampf(dosing.ml_per_day_alk,   0.0f, MAX_AFR_ML_PER_DAY);
+  dosing.ml_per_day_ca    = clampf(dosing.ml_per_day_ca,    0.0f, MAX_MG_ML_PER_DAY);
+  dosing.ml_per_day_cacl2 = clampf(dosing.ml_per_day_cacl2, 0.0f, MAX_AFR_ML_PER_DAY);
+  dosing.ml_per_day_naoh  = clampf(dosing.ml_per_day_naoh,  0.0f, MAX_MG_ML_PER_DAY);
 
   enforceChemSafetyCaps();
   updatePumpSchedules();
   saveDosingToPrefs();
   lastSafetyBackoffTs = now;
 }
-
 void firebaseSyncTankSize() {
   String path = "/devices/" + String(DEVICE_ID) + "/settings/tankSize";
   String val = firebaseGetJson(path);
@@ -1189,6 +1475,7 @@ void firebaseSyncTankSize() {
   CA_PPM_PER_ML_AFR_TANK  = 0.037f   * scaleFactor;
   MG_PPM_PER_ML_AFR_TANK  = 0.006f   * scaleFactor;
   MG_PPM_PER_ML_MG_TANK   = 0.20f    * scaleFactor;
+  recalcChemConstantsForTank();
   updatePumpSchedules();
 }
 
@@ -1222,7 +1509,7 @@ void firebaseSyncDoseScheduleOnce() {
   clearPendingBuckets("schedule changed");
 }
 
-void firebaseSyncDosingPlanOnce() {
+/*void firebaseSyncDosingPlanOnce() {
   String path = "/devices/" + String(DEVICE_ID) + "/dosingPlan";
   String payload = firebaseGetJson(path);
   if (payload.length() == 0 || payload == "null") return;
@@ -1253,6 +1540,57 @@ void firebaseSyncDosingPlanOnce() {
   dosing.ml_per_day_afr  = na;
   dosing.ml_per_day_mg   = nm;
   dosing.ml_per_day_tbd  = nt;
+  updatePumpSchedules();
+  saveDosingToPrefs();
+  clearPendingBuckets("plan changed");
+}*/
+void firebaseSyncDosingPlanOnce() {
+  String path = "/devices/" + String(DEVICE_ID) + "/dosingPlan";
+  String payload = firebaseGetJson(path);
+  if (payload.length() == 0 || payload == "null") return;
+
+  StaticJsonDocument<512> doc;
+  if (deserializeJson(doc, payload)) return;
+
+  auto readFloat = [&](const char* key, float fallback) -> float {
+    if (!doc.containsKey(key)) return fallback;
+    JsonVariant v = doc[key];
+    if (v.is<float>() || v.is<int>() || v.is<double>()) return (float)v.as<double>();
+    if (v.is<const char*>()) return String(v.as<const char*>()).toFloat();
+    return fallback;
+  };
+
+  float nk  = clampf(readFloat("kalk",  dosing.ml_per_day_kalk),  0.0f, MAX_KALK_ML_PER_DAY);
+  float na  = clampf(readFloat("afr",   dosing.ml_per_day_afr),   0.0f, MAX_AFR_ML_PER_DAY);
+  float nm  = clampf(readFloat("mg",    dosing.ml_per_day_mg),    0.0f, MAX_MG_ML_PER_DAY);
+  float nt  = clampf(readFloat("tbd",   dosing.ml_per_day_tbd),   0.0f, MAX_TBD_ML_PER_DAY);
+
+  float nalk   = clampf(readFloat("alk",   dosing.ml_per_day_alk),   0.0f, MAX_AFR_ML_PER_DAY);
+  float nca    = clampf(readFloat("ca",    dosing.ml_per_day_ca),    0.0f, MAX_MG_ML_PER_DAY);
+  float ncacl2 = clampf(readFloat("cacl2", dosing.ml_per_day_cacl2), 0.0f, MAX_AFR_ML_PER_DAY);
+  float nnaoh  = clampf(readFloat("naoh",  dosing.ml_per_day_naoh),  0.0f, MAX_MG_ML_PER_DAY);
+
+  bool changed =
+      fabsf(nk    - dosing.ml_per_day_kalk)  > 0.01f ||
+      fabsf(na    - dosing.ml_per_day_afr)   > 0.01f ||
+      fabsf(nm    - dosing.ml_per_day_mg)    > 0.01f ||
+      fabsf(nt    - dosing.ml_per_day_tbd)   > 0.01f ||
+      fabsf(nalk  - dosing.ml_per_day_alk)   > 0.01f ||
+      fabsf(nca   - dosing.ml_per_day_ca)    > 0.01f ||
+      fabsf(ncacl2- dosing.ml_per_day_cacl2) > 0.01f ||
+      fabsf(nnaoh - dosing.ml_per_day_naoh)  > 0.01f;
+
+  if (!changed) return;
+
+  dosing.ml_per_day_kalk  = nk;
+  dosing.ml_per_day_afr   = na;
+  dosing.ml_per_day_mg    = nm;
+  dosing.ml_per_day_tbd   = nt;
+  dosing.ml_per_day_alk   = nalk;
+  dosing.ml_per_day_ca    = nca;
+  dosing.ml_per_day_cacl2 = ncacl2;
+  dosing.ml_per_day_naoh  = nnaoh;
+
   updatePumpSchedules();
   saveDosingToPrefs();
   clearPendingBuckets("plan changed");
@@ -1338,6 +1676,7 @@ static void applyDosingMode(DosingMode m, const char* why) {
   gDosingMode = m;
   saveDosingModeToPrefs(gDosingMode);
   clearPendingBuckets("mode changed");
+  updatePumpSchedules();
   publishDosingModeState();
   Serial.printf("[MODE] Applied dosingMode=%d (%s)\n", (int)gDosingMode, why ? why : "");
 }
@@ -1564,35 +1903,45 @@ static void pollLatestTestSampleAndMaybeRunAi() {
   if (now - lastPollMs < 1500) return;
   lastPollMs = now;
 
-  const String body = firebaseGetJson("/devices/" + String(DEVICE_ID) + "/tests?orderBy=%22timestamp%22&limitToLast=1");
+  const String body = firebaseGetJson(
+    "/devices/" + String(DEVICE_ID) + "/tests?orderBy=%22timestamp%22&limitToLast=1"
+  );
   if (body.length() == 0 || body == "null") return;
 
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<1024> doc;
   if (deserializeJson(doc, body)) return;
-  JsonObject o = doc.as<JsonObject>();
-  if (o.isNull()) return;
+
+  JsonObject root = doc.as<JsonObject>();
+  if (root.isNull()) return;
+
+  JsonObject sample;
+  for (JsonPair kv : root) {
+    if (kv.value().is<JsonObject>()) {
+      sample = kv.value().as<JsonObject>();
+      break;
+    }
+  }
+  if (sample.isNull()) return;
 
   uint64_t key = 0;
-  if (o.containsKey("timestamp")) key = (uint64_t)o["timestamp"].as<unsigned long long>();
-  if (key == 0 && o.containsKey("ts")) key = (uint64_t)o["ts"].as<unsigned long long>();
+  if (sample["timestamp"].is<unsigned long long>()) key = sample["timestamp"].as<unsigned long long>();
+  if (key == 0 && sample["ts"].is<unsigned long long>()) key = sample["ts"].as<unsigned long long>();
   if (key == 0) key = fnv1a64(body.c_str());
   if (key == 0 || key == gLastTestSampleKey) return;
   gLastTestSampleKey = key;
 
-  const float ca  = o.containsKey("ca")  ? o["ca"].as<float>()  : NAN;
-  const float alk = o.containsKey("alk") ? o["alk"].as<float>() : NAN;
-  const float mg  = o.containsKey("mg")  ? o["mg"].as<float>()  : NAN;
-  const float ph  = o.containsKey("ph")  ? o["ph"].as<float>()  : NAN;
-  const float tbd = o.containsKey("tbd") ? o["tbd"].as<float>() : 0.0f;
+  const float ca  = (sample["ca"].is<float>()  || sample["ca"].is<int>())  ? sample["ca"].as<float>()  : NAN;
+  const float alk = (sample["alk"].is<float>() || sample["alk"].is<int>()) ? sample["alk"].as<float>() : NAN;
+  const float mg  = (sample["mg"].is<float>()  || sample["mg"].is<int>())  ? sample["mg"].as<float>()  : NAN;
+  const float ph  = (sample["ph"].is<float>()  || sample["ph"].is<int>())  ? sample["ph"].as<float>()  : NAN;
+  const float tbd = (sample["tbd"].is<float>() || sample["tbd"].is<int>()) ? sample["tbd"].as<float>() : 0.0f;
 
   // Enforce "AI runs once per mode" during bench tests.
-  if ((gSelfTestActive || gModeSweepActive)) {
-    if (gAiRanForMode == (int)gDosingMode) {
-      Serial.printf("AI: skipping extra test sample (already ran for mode %d)\n", (int)gDosingMode);
-      return;
-    }
-    gAiRanForMode = (int)gDosingMode;
+  if (gAiRanForMode == (int)gDosingMode) {
+    Serial.printf("AI: skipping extra test sample (already ran for mode %d)\n", (int)gDosingMode);
+    return;
   }
+  gAiRanForMode = (int)gDosingMode;
 
   Serial.printf("TEST SAMPLE: ts=%llu ca=%.1f alk=%.2f mg=%.1f ph=%.2f\n",
                 (unsigned long long)key, ca, alk, mg, ph);
@@ -1723,9 +2072,9 @@ static void modeSweepTick() {
 }
 
 // ===================== AI core (relaxed timing when selfTest/modeSweep) =====================
-void onNewTestInput(float ca, float alk, float mg, float ph, float tbd_val) {
+/*void onNewTestInput(float ca, float alk, float mg, float ph, float tbd_val) {
   lastTest = currentTest;
-  currentTest.t   = nowSeconds();
+  currentTest.t = (gCurrentInputEpochSec > 0) ? gCurrentInputEpochSec : nowSeconds();
   currentTest.ca  = ca;
   currentTest.alk = alk;
   currentTest.mg  = mg;
@@ -1815,6 +2164,286 @@ void onNewTestInput(float ca, float alk, float mg, float ph, float tbd_val) {
   updatePumpSchedules();
   saveDosingToPrefs();
   lastSafetyBackoffTs = nowSeconds();
+    Serial.printf(
+    "AI NEW PLAN: kalk=%.2f afr=%.2f mg=%.2f tbd=%.2f\n",
+    dosing.ml_per_day_kalk,
+    dosing.ml_per_day_afr,
+    dosing.ml_per_day_mg,
+    dosing.ml_per_day_tbd
+  );
+
+  {
+  {
+    String path = "/devices/" + String(DEVICE_ID) + "/dosingPlan";
+    String json = "{";
+    json += "\"kalk\":"  + String(dosing.ml_per_day_kalk,  2) + ",";
+    json += "\"afr\":"   + String(dosing.ml_per_day_afr,   2) + ",";
+    json += "\"mg\":"    + String(dosing.ml_per_day_mg,    2) + ",";
+    json += "\"tbd\":"   + String(dosing.ml_per_day_tbd,   2) + ",";
+    json += "\"alk\":"   + String(dosing.ml_per_day_alk,   2) + ",";
+    json += "\"ca\":"    + String(dosing.ml_per_day_ca,    2) + ",";
+    json += "\"cacl2\":" + String(dosing.ml_per_day_cacl2, 2) + ",";
+    json += "\"naoh\":"  + String(dosing.ml_per_day_naoh,  2) + ",";
+    json += "\"updatedAt\":" + String((unsigned long long)getEpochMillis()) + ",";
+    json += "\"updatedBy\":\"ai\"";
+    json += "}";
+
+    if (firebasePutJson(path, json)) {
+      Serial.println("AI: wrote new dosingPlan to RTDB");
+    } else {
+      Serial.println("AI: FAILED writing new dosingPlan to RTDB");
+    }
+  }
+
+  publishAiBreadcrumbs(gAiCurrentSource, (gModeSweepActive ? "modeSweep" : "onNewTestInput"), ca, alk, mg, ph);
+  Serial.printf("AI Update: mode=%d recalculated dosing plan.\n", (int)gDosingMode);
+}*/
+void onNewTestInput(float ca, float alk, float mg, float ph, float tbd_val) {
+  lastTest = currentTest;
+  //currentTest.t   = nowSeconds();
+  currentTest.t = (gCurrentInputEpochSec > 0) ? gCurrentInputEpochSec : nowSeconds();
+  currentTest.ca  = ca;
+  currentTest.alk = alk;
+  currentTest.mg  = mg;
+  currentTest.ph  = ph;
+  currentTest.tbd = tbd_val;
+  pushHistory(currentTest);
+
+  if (ca   < 300.0f || ca  > 550.0f ||
+      alk  <   5.0f || alk > 14.0f  ||
+      mg   < 1100.0f || mg > 1600.0f ||
+      ph   <   7.0f || ph  >  9.0f) {
+    Serial.println("SAFETY: IGNORING TEST for dosing (out-of-range). Graph updated only.");
+    return;
+  }
+
+  if (lastTest.t == 0) {
+    updatePumpSchedules();
+    publishAiBreadcrumbs(gAiCurrentSource, "firstTest", ca, alk, mg, ph);
+    return;
+  }
+
+  float days = float(currentTest.t - lastTest.t) / 86400.0f;
+  if (days <= 0.25f && !(gSelfTestActive || gModeSweepActive)) {
+    Serial.println("SAFETY: Tests too close together, ignoring for dosing updates.");
+    return;
+  }
+  if (days <= 0.0f) days = 0.0001f;
+
+  float consAlk = (lastTest.alk - currentTest.alk) / days;
+  float consCa  = (lastTest.ca  - currentTest.ca ) / days;
+  float consMg  = (lastTest.mg  - currentTest.mg ) / days;
+  float consTbd = (lastTest.tbd - currentTest.tbd) / days;
+
+  if (consAlk < 0.0f) consAlk = 0.0f;
+  if (consCa  < 0.0f) consCa  = 0.0f;
+  if (consMg  < 0.0f) consMg  = 0.0f;
+  if (consTbd < 0.0f) consTbd = 0.0f;
+
+  float phError = TARGET_PH - currentTest.ph;
+
+  // Default to current values
+  float suggested_kalk  = dosing.ml_per_day_kalk;
+  float suggested_afr   = dosing.ml_per_day_afr;
+  float suggested_mg    = dosing.ml_per_day_mg;
+  float suggested_tbd   = dosing.ml_per_day_tbd;
+  float suggested_alk   = dosing.ml_per_day_alk;
+  float suggested_ca    = dosing.ml_per_day_ca;
+  float suggested_cacl2 = dosing.ml_per_day_cacl2;
+  float suggested_naoh  = dosing.ml_per_day_naoh;
+
+  switch (gDosingMode) {
+    case MODE_KALK_ONLY: {
+      if (DKH_PER_ML_KALK_TANK > 0.0f) {
+        suggested_kalk = consAlk / DKH_PER_ML_KALK_TANK;
+      }
+      suggested_afr = 0.0f;
+      suggested_mg  = 0.0f;
+      suggested_tbd = 0.0f;
+      suggested_alk = 0.0f;
+      suggested_ca  = 0.0f;
+      suggested_cacl2 = 0.0f;
+      suggested_naoh  = 0.0f;
+    } break;
+
+    case MODE_AFR_ONLY: {
+      if (DKH_PER_ML_AFR_TANK > 0.0f) {
+        suggested_afr = consAlk / DKH_PER_ML_AFR_TANK;
+      }
+      suggested_kalk = 0.0f;
+      suggested_mg   = 0.0f;
+      suggested_tbd  = 0.0f;
+      suggested_alk  = 0.0f;
+      suggested_ca   = 0.0f;
+      suggested_cacl2 = 0.0f;
+      suggested_naoh  = 0.0f;
+    } break;
+
+    case MODE_KALK_AFR_MG: {
+      float kalkFrac = 0.8f;
+      if (!isnan(currentTest.ph)) {
+        if (phError > 0.05f)      kalkFrac = 0.90f; // low pH => more kalk
+        else if (phError < -0.05f) kalkFrac = 0.70f; // high pH => less kalk
+      }
+      kalkFrac = clampf(kalkFrac, 0.6f, 0.95f);
+
+      float alkFromKalk = kalkFrac * consAlk;
+      float alkFromAfr  = (1.0f - kalkFrac) * consAlk;
+
+      suggested_kalk = (DKH_PER_ML_KALK_TANK > 0.0f) ? (alkFromKalk / DKH_PER_ML_KALK_TANK) : 0.0f;
+      suggested_afr  = (DKH_PER_ML_AFR_TANK  > 0.0f) ? (alkFromAfr  / DKH_PER_ML_AFR_TANK ) : 0.0f;
+
+      float mgFromAfr = suggested_afr * MG_PPM_PER_ML_AFR_TANK;
+      suggested_mg = dosing.ml_per_day_mg;
+      if (consMg > mgFromAfr + 0.5f && MG_PPM_PER_ML_MG_TANK > 0.0f) {
+        suggested_mg += ((consMg - mgFromAfr) / MG_PPM_PER_ML_MG_TANK) * 0.3f;
+      }
+
+      suggested_tbd = (consTbd > 0.1f) ? (dosing.ml_per_day_tbd + consTbd * 0.2f) : dosing.ml_per_day_tbd;
+      suggested_alk = 0.0f;
+      suggested_ca  = 0.0f;
+      suggested_cacl2 = 0.0f;
+      suggested_naoh  = 0.0f;
+    } break;
+
+    case MODE_2PART_MG: {
+      suggested_kalk = 0.0f;
+      suggested_afr  = 0.0f;
+      suggested_tbd  = 0.0f;
+      suggested_cacl2 = 0.0f;
+      suggested_naoh  = 0.0f;
+
+      if (DKH_PER_ML_BRS_ALK_TANK > 0.0f) {
+        suggested_alk = consAlk / DKH_PER_ML_BRS_ALK_TANK;
+      }
+      if (CA_PPM_PER_ML_BRS_CA_TANK > 0.0f) {
+        suggested_ca = consCa / CA_PPM_PER_ML_BRS_CA_TANK;
+      }
+      if (MG_PPM_PER_ML_MG_TANK > 0.0f) {
+        suggested_mg = consMg / MG_PPM_PER_ML_MG_TANK;
+      }
+    } break;
+
+    case MODE_KALK_2PART_MG: {
+      suggested_afr = 0.0f;
+      suggested_tbd = 0.0f;
+      suggested_cacl2 = 0.0f;
+      suggested_naoh  = 0.0f;
+
+      float kalkFrac = 0.8f;
+      if (!isnan(currentTest.ph)) {
+        if (phError > 0.05f)      kalkFrac = 0.90f;
+        else if (phError < -0.05f) kalkFrac = 0.65f;
+      }
+      kalkFrac = clampf(kalkFrac, 0.4f, 0.95f);
+
+      float alkFromKalk = kalkFrac * consAlk;
+      float alkFromAlk  = (1.0f - kalkFrac) * consAlk;
+
+      suggested_kalk = (DKH_PER_ML_KALK_TANK > 0.0f)    ? (alkFromKalk / DKH_PER_ML_KALK_TANK)    : 0.0f;
+      suggested_alk  = (DKH_PER_ML_BRS_ALK_TANK > 0.0f) ? (alkFromAlk  / DKH_PER_ML_BRS_ALK_TANK) : 0.0f;
+
+      if (CA_PPM_PER_ML_BRS_CA_TANK > 0.0f) {
+        suggested_ca = consCa / CA_PPM_PER_ML_BRS_CA_TANK;
+      }
+      if (MG_PPM_PER_ML_MG_TANK > 0.0f) {
+        suggested_mg = consMg / MG_PPM_PER_ML_MG_TANK;
+      }
+    } break;
+
+    case MODE_KALK_CACL2_NAOH_MG: {
+      suggested_afr = 0.0f;
+      suggested_tbd = 0.0f;
+      suggested_alk = 0.0f;
+      suggested_ca  = 0.0f;
+
+      float kalkFrac = 0.8f;
+      if (!isnan(currentTest.ph)) {
+        if (phError > 0.05f)      kalkFrac = 0.90f;
+        else if (phError < -0.05f) kalkFrac = 0.65f;
+      }
+      kalkFrac = clampf(kalkFrac, 0.4f, 0.95f);
+
+      float alkFromKalk = kalkFrac * consAlk;
+      float alkFromNaoh = (1.0f - kalkFrac) * consAlk;
+
+      suggested_kalk = (DKH_PER_ML_KALK_TANK > 0.0f)   ? (alkFromKalk / DKH_PER_ML_KALK_TANK)   : 0.0f;
+      suggested_naoh = (DKH_PER_ML_NAOH_TANK > 0.0f)   ? (alkFromNaoh / DKH_PER_ML_NAOH_TANK)   : 0.0f;
+
+      if (CA_PPM_PER_ML_NACL_TANK > 0.0f) {
+        suggested_cacl2 = consCa / CA_PPM_PER_ML_NACL_TANK;
+      }
+      if (MG_PPM_PER_ML_MG_TANK > 0.0f) {
+        suggested_mg = consMg / MG_PPM_PER_ML_MG_TANK;
+      }
+    } break;
+  }
+
+  suggested_kalk  = max(0.0f, suggested_kalk);
+  suggested_afr   = max(0.0f, suggested_afr);
+  suggested_mg    = max(0.0f, suggested_mg);
+  suggested_tbd   = max(0.0f, suggested_tbd);
+  suggested_alk   = max(0.0f, suggested_alk);
+  suggested_ca    = max(0.0f, suggested_ca);
+  suggested_cacl2 = max(0.0f, suggested_cacl2);
+  suggested_naoh  = max(0.0f, suggested_naoh);
+
+  dosing.ml_per_day_kalk  = adjustWithLimit(dosing.ml_per_day_kalk,  suggested_kalk);
+  dosing.ml_per_day_afr   = adjustWithLimit(dosing.ml_per_day_afr,   suggested_afr);
+  dosing.ml_per_day_mg    = adjustWithLimit(dosing.ml_per_day_mg,    suggested_mg);
+  dosing.ml_per_day_tbd   = adjustWithLimit(dosing.ml_per_day_tbd,   suggested_tbd);
+  dosing.ml_per_day_alk   = adjustWithLimit(dosing.ml_per_day_alk,   suggested_alk);
+  dosing.ml_per_day_ca    = adjustWithLimit(dosing.ml_per_day_ca,    suggested_ca);
+  dosing.ml_per_day_cacl2 = adjustWithLimit(dosing.ml_per_day_cacl2, suggested_cacl2);
+  dosing.ml_per_day_naoh  = adjustWithLimit(dosing.ml_per_day_naoh,  suggested_naoh);
+
+  dosing.ml_per_day_kalk  = clampf(dosing.ml_per_day_kalk,  0.0f, MAX_KALK_ML_PER_DAY);
+  dosing.ml_per_day_afr   = clampf(dosing.ml_per_day_afr,   0.0f, MAX_AFR_ML_PER_DAY);
+  dosing.ml_per_day_mg    = clampf(dosing.ml_per_day_mg,    0.0f, MAX_MG_ML_PER_DAY);
+  dosing.ml_per_day_tbd   = clampf(dosing.ml_per_day_tbd,   0.0f, MAX_TBD_ML_PER_DAY);
+  dosing.ml_per_day_alk   = clampf(dosing.ml_per_day_alk,   0.0f, MAX_AFR_ML_PER_DAY);
+  dosing.ml_per_day_ca    = clampf(dosing.ml_per_day_ca,    0.0f, MAX_MG_ML_PER_DAY);
+  dosing.ml_per_day_cacl2 = clampf(dosing.ml_per_day_cacl2, 0.0f, MAX_AFR_ML_PER_DAY);
+  dosing.ml_per_day_naoh  = clampf(dosing.ml_per_day_naoh,  0.0f, MAX_MG_ML_PER_DAY);
+
+  enforceChemSafetyCaps();
+  updatePumpSchedules();
+  saveDosingToPrefs();
+  lastSafetyBackoffTs = nowSeconds();
+
+  Serial.printf(
+    "AI NEW PLAN: kalk=%.2f afr=%.2f mg=%.2f tbd=%.2f alk=%.2f ca=%.2f cacl2=%.2f naoh=%.2f\n",
+    dosing.ml_per_day_kalk,
+    dosing.ml_per_day_afr,
+    dosing.ml_per_day_mg,
+    dosing.ml_per_day_tbd,
+    dosing.ml_per_day_alk,
+    dosing.ml_per_day_ca,
+    dosing.ml_per_day_cacl2,
+    dosing.ml_per_day_naoh
+  );
+
+  {
+    String path = "/devices/" + String(DEVICE_ID) + "/dosingPlan";
+    String json = "{";
+    json += "\"kalk\":"  + String(dosing.ml_per_day_kalk,  2) + ",";
+    json += "\"afr\":"   + String(dosing.ml_per_day_afr,   2) + ",";
+    json += "\"mg\":"    + String(dosing.ml_per_day_mg,    2) + ",";
+    json += "\"tbd\":"   + String(dosing.ml_per_day_tbd,   2) + ",";
+    json += "\"alk\":"   + String(dosing.ml_per_day_alk,   2) + ",";
+    json += "\"ca\":"    + String(dosing.ml_per_day_ca,    2) + ",";
+    json += "\"cacl2\":" + String(dosing.ml_per_day_cacl2, 2) + ",";
+    json += "\"naoh\":"  + String(dosing.ml_per_day_naoh,  2) + ",";
+    json += "\"updatedAt\":" + String((unsigned long long)getEpochMillis()) + ",";
+    json += "\"updatedBy\":\"ai\"";
+    json += "}";
+
+    if (firebasePutJson(path, json)) {
+      Serial.println("AI: wrote new dosingPlan to RTDB");
+    } else {
+      Serial.println("AI: FAILED writing new dosingPlan to RTDB");
+    }
+  }
 
   publishAiBreadcrumbs(gAiCurrentSource, (gModeSweepActive ? "modeSweep" : "onNewTestInput"), ca, alk, mg, ph);
   Serial.printf("AI Update: mode=%d recalculated dosing plan.\n", (int)gDosingMode);
@@ -2148,10 +2777,10 @@ static void doseAndLog(int pumpIndex, const String& pumpName, int pin, float ml,
   firebaseLogDoseRun(pumpIndex, pumpName, ml, sec, flowMlPerMin, source);
 }
 
-void pollApexAndPublish(bool allowAiUpdate) {
-  if (!apexEnabled) return;
-  if (!apexApi) return;
-  if (!isValidIPv4(apexIp)) return;
+bool pollApexAndPublish(bool allowAiUpdate) {
+  if (!apexEnabled) return false;
+  if (!apexApi) return false;
+  if (!isValidIPv4(apexIp)) return false;
 
   String ret = apexApi->getState();
   Serial.println(ret);
@@ -2166,7 +2795,7 @@ void pollApexAndPublish(bool allowAiUpdate) {
 
   if (!apexValuesLookValid(ca, alk, mg, ph)) {
     Serial.printf("APEX read invalid: ca=%.1f alk=%.2f mg=%.1f ph=%.2f\n", ca, alk, mg, ph);
-    return;
+    return false;
   }
 
   // Remember latest good values for scheduler freshness/use.
@@ -2204,17 +2833,18 @@ void pollApexAndPublish(bool allowAiUpdate) {
 
   // 2) Optionally feed the AI
   if (allowAiUpdate) {
-    // Don’t AI-update if changes are tiny (noise) unless it’s the first time.
     if (!apexChangedEnough(ca, alk, mg, ph)) {
       Serial.println("APEX: change too small, skipping AI update.");
-      return;
+      return false;
     }
 
     Serial.printf("APEX -> AI update: ca=%.1f alk=%.2f mg=%.1f ph=%.2f\n", ca, alk, mg, ph);
 
     const char* prev = gAiCurrentSource;
     gAiCurrentSource = "apex";
+    gCurrentInputEpochSec = (uint32_t)(getEpochMillis() / 1000ULL);
     onNewTestInput(ca, alk, mg, ph, 0.0f);
+    gCurrentInputEpochSec = 0;
     publishAiBreadcrumbs("apex", "poll", ca, alk, mg, ph);
     gAiCurrentSource = prev;
     lastApexAiCa  = ca;
@@ -2222,7 +2852,6 @@ void pollApexAndPublish(bool allowAiUpdate) {
     lastApexAiMg  = mg;
     lastApexAiPh  = ph;
 
-    // (optional) log a “test” into /tests so it shows in history table/chart
     StaticJsonDocument<256> doc;
     doc["ca"] = ca;
     doc["alk"] = alk;
@@ -2233,9 +2862,12 @@ void pollApexAndPublish(bool allowAiUpdate) {
     String body;
     serializeJson(doc, body);
     firebasePostJson("/devices/" + String(DEVICE_ID) + "/tests", body);
-  }
-}
 
+    return true;
+  }
+
+  return false;
+}
 static bool inRange(float v, float lo, float hi) {
   return isfinite(v) && (v >= lo) && (v <= hi);
 }
@@ -2401,6 +3033,7 @@ void setup(){
   updatePumpSchedules();
   rebuildScheduleSlots();
   initBucketPrefs();
+  recalcChemConstantsForTank();
 
   wifiTuningInit();
 
@@ -2461,15 +3094,20 @@ void loop(){
   }
 
   // Throttled Apex polling only. Do NOT poll every loop.
-  if (apexEnabled) {
-    const uint64_t nowMs64 = millis();
-    if (nowMs64 - lastApexPollMs >= APEX_POLL_MIN_MS) {
-      const bool allowAiUpdate = (nowMs64 - lastApexAiApplyMs >= APEX_AI_MIN_MS);
-      pollApexAndPublish(allowAiUpdate);
-      lastApexPollMs = nowMs64;
-      if (allowAiUpdate) lastApexAiApplyMs = nowMs64;
+if (apexEnabled) {
+  const uint64_t nowMs64 = millis();
+  if (nowMs64 - lastApexPollMs >= APEX_POLL_MIN_MS) {
+    const bool allowAiUpdate = (nowMs64 - lastApexAiApplyMs >= APEX_AI_MIN_MS);
+
+    bool aiRan = pollApexAndPublish(allowAiUpdate);
+
+    lastApexPollMs = nowMs64;
+    if (aiRan) {
+      lastApexAiApplyMs = nowMs64;
+      gLastAiRunMs = nowMs64;
     }
   }
+}
 
   // Scheduler runs after Apex poll so fresh Apex data can be preferred.
   runAiScheduler();

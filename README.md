@@ -359,3 +359,51 @@ mode 4 Alk Calc Mg  pump 1-3 runs
 mode 5 kalk Alk Calc Mb  pump 1-4 run
 mode 6 Kalk Calcium Chloride, Sodium Hydroxide, Mg pump 1-4 run
 /////////////////////////////////////////////////////////////////////////////////////////
+// ok new chemicals/////////////
+Constants for a 300 gallon tank
+
+A 300 gallon tank is:
+
+tankLiters = 300.0f * 3.78541f;   // 1135.623 L
+1) BRS alkalinity part
+
+Formula:
+
+DKH_PER_ML_BRS_ALK_TANK = ((1900.0f / 1000.0f) * 2.8f) / tankLiters;
+
+Result for 300 gal:
+
+DKH_PER_ML_BRS_ALK_TANK = 0.00468f;
+2) BRS calcium part
+
+Formula:
+
+CA_PPM_PER_ML_BRS_CA_TANK = (37000.0f / 1000.0f) / tankLiters;
+
+Result for 300 gal:
+
+CA_PPM_PER_ML_BRS_CA_TANK = 0.03258f;
+3) Sodium hydroxide part
+
+If you are mixing the NaOH recipe to the same matched strength, use the same alk formula.
+
+DKH_PER_ML_NAOH_TANK = ((1900.0f / 1000.0f) * 2.8f) / tankLiters;
+
+Result for 300 gal:
+
+DKH_PER_ML_NAOH_TANK = 0.00468f;
+4) Calcium chloride part for cacl2
+
+If your cacl2 solution is the standard calcium recipe, use the same calcium formula.
+
+CA_PPM_PER_ML_NACL_TANK = (37000.0f / 1000.0f) / tankLiters;
+
+Result for 300 gal:
+
+CA_PPM_PER_ML_NACL_TANK = 0.03258f;
+
+
+/////////////////////moving to firebase streaming (not polling) ///////////////////////
+un: fbStreamDevices@aidoser.com, pw: Frinov25!+!, UID: PajoU0VDH2Oc45dcslIratTxilU2
+App api_key "AIzaSyDDjIg9vRzu8ap3Wt0KQQT-rAFf7rqWoRE"
+//////////////////////////////////////////////////////////////////////////////////////
